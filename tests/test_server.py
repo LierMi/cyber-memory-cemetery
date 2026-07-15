@@ -1,4 +1,5 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -113,13 +114,34 @@ class ArchiveSealTests(unittest.TestCase):
         self.assertNotIn("pinata-secret", str(response))
 
     def test_browser_fallback_uses_the_frozen_payload_canonical_hash(self):
-        source = Path("app.js").read_text(encoding="utf-8")
+        script = r"""
+const { webcrypto } = require("node:crypto");
+const core = require("./core.js");
+const payload = {
+  case: { id: "xiami", originalUrl: "https://www.xiami.com" },
+  contentCreatedAt: "2026-07-15T12:00:00Z",
+  verification: {
+    verificationState: "cached_live",
+    truthScore: 87,
+    requests: [{ requestId: "gonka-a" }, { requestId: "gonka-b" }],
+  },
+};
+core.createLocalArchiveSeal(payload, { cryptoProvider: webcrypto }).then((seal) => {
+  process.stdout.write(JSON.stringify(seal));
+});
+"""
+        completed = subprocess.run(
+            ["node", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        seal = json.loads(completed.stdout)
+        digest = "dcd88d688b543883ad651ef7a542993450bc9ffd25f8290891a98874214bb02b"
 
-        self.assertIn("CemeteryCore.createLocalArchiveSeal", source)
-        self.assertIn("CemeteryCore.sha256Hex", source)
-        self.assertIn('"local-sealed": "本地封存，不具备永久存储证明"', source)
-        self.assertNotIn('provider: "demo-local"', source)
-        self.assertNotIn("ar://demo", source)
+        self.assertEqual(seal["provider"], "local-sealed")
+        self.assertEqual(seal["contentHash"], f"sha256:{digest}")
+        self.assertEqual(seal["archiveId"], f"local://sha256/{digest}")
 
 
 class VerificationCacheTests(unittest.TestCase):

@@ -16,7 +16,7 @@ const steps = [
     desc: "在不虚构事实的前提下，生成庄重克制的链上挽歌。",
   },
   {
-    title: "打包永久档案",
+    title: "打包封存档案",
     desc: "生成结构化 JSON，可上传至 Arweave、Irys 或 IPFS。",
   },
 ];
@@ -765,7 +765,8 @@ function renderEvidenceConfidence(item) {
 
 function renderCredentialPanel(item, archiveSeal) {
   const credential = state.credentials[item.id];
-  const disabled = archiveSeal ? "" : "disabled";
+  const hasReceipt = CemeteryCore.isStructurallyValidArchiveReceipt(archiveSeal);
+  const disabled = hasReceipt ? "" : "disabled";
   return `
     <div class="detail-section credential-panel">
       <h4>纪念凭证</h4>
@@ -778,7 +779,7 @@ function renderCredentialPanel(item, archiveSeal) {
         </div>
         <div class="credential-copy">
           <p class="text-note">
-            ${archiveSeal ? "凭证由可验证封存回执生成，链上状态为待认领。" : "先完成可验证封存，系统才能依据回执生成纪念凭证。"}
+            ${hasReceipt ? "凭证由可验证封存回执生成，链上状态为待认领。" : "先完成可验证封存，系统才能依据回执生成纪念凭证。"}
           </p>
           <div class="archive-actions">
             <button class="button primary" type="button" data-action="generate-credential" ${disabled}>
@@ -819,10 +820,11 @@ function compactHash(value, head = 14, tail = 8) {
 function archiveReadinessFor(item, archiveSeal, requests) {
   const evidenceCount = publicEvidenceClaims(item).length;
   const credential = state.credentials[item.id];
+  const permanent = CemeteryCore.isPermanentArchiveReceipt(archiveSeal);
   const values = {
     公开证据: `${evidenceCount} 条公开摘要`,
     模型会诊: `${requests.length} 个 Request ID`,
-    永久封存: archiveSeal ? archiveSeal.status : "待封存",
+    永久封存: permanent ? archiveSeal.archiveId : archiveSeal ? "本地封存，待上传 IPFS" : "待上传 IPFS",
     纪念凭证: credential ? credential.id : "待生成",
   };
   return CemeteryCore.archiveReadiness({
@@ -912,7 +914,7 @@ function renderProofChainBoard(item, archiveSeal, requests, verificationSource) 
       label: "Archive",
       value: archiveSeal ? compactHash(archiveSeal.archiveId, 16, 10) : "pending",
       note: archiveSeal ? archiveSeal.status : "等待生成内容哈希。",
-      ready: Boolean(archiveSeal),
+      ready: CemeteryCore.isStructurallyValidArchiveReceipt(archiveSeal),
     },
     {
       label: "Witness",
@@ -1033,7 +1035,7 @@ function renderConsoleWorkbench(item, liveArchive, verification, requests, verif
 
   const archiveCount = liveArchive?.count || item.archiveCount;
   const evidenceSource = liveArchive?.source === "wayback" ? "Wayback live" : "Local evidence";
-  const statusText = state.running ? "RUNNING" : verification?.source === "gonka" ? "GONKA LIVE" : "READY";
+  const statusText = state.running ? "RUNNING" : CemeteryCore.verificationResultCopy(verification);
   const rounds = steps.map((step, index) => ({
     round: `ROUND ${String(index + 1).padStart(2, "0")}`,
     title: step.title,
@@ -1108,7 +1110,7 @@ function renderArchiveWorkbench(item, archiveSeal) {
         <span>Memorial Credential</span>
         <strong>${escapeHtml(credential?.id || "待生成")}</strong>
         <p>${credential ? "凭证已生成，链上状态为待认领。" : "完成封存后生成凭证和链上兼容 metadata。"}</p>
-        <button class="button secondary" type="button" data-action="generate-credential" ${archiveSeal ? "" : "disabled"}>
+        <button class="button secondary" type="button" data-action="generate-credential" ${CemeteryCore.isStructurallyValidArchiveReceipt(archiveSeal) ? "" : "disabled"}>
           生成凭证
         </button>
       </article>
@@ -1131,11 +1133,7 @@ function renderArchiveWorkbench(item, archiveSeal) {
       item,
       archiveSeal,
       state.currentMemorial?.verification?.requests || item.requests.map(normalizePresetRequest),
-      state.currentMemorial?.verification?.source === "gonka"
-        ? "Gonka 实时验证"
-        : state.currentMemorial?.verification?.source === "mock"
-          ? "Gonka mock 兜底"
-          : "本地预置验证",
+      CemeteryCore.verificationResultCopy(state.currentMemorial?.verification),
     )}
     ${renderArchiveReadinessPanel(
       item,
@@ -1201,12 +1199,15 @@ function buildArchivePayload(item, liveArchive, verification) {
   const firstSeen = liveArchive?.firstYear || item.firstSeen;
   const lastSeen = liveArchive?.lastYear || item.lastSeen;
   const actions = getActions(item.id);
+  const verificationSourceByState = {
+    live_consensus: "gonka-live-consensus",
+    cached_live: "gonka-cache",
+    partial: "gonka-partial",
+    mock_fallback: "gonka-mock-fallback",
+    demo_fallback: "local-demo-fallback",
+  };
   const verificationSource =
-    verification?.source === "gonka"
-      ? "gonka-live"
-      : verification?.source === "mock"
-        ? "gonka-mock-fallback"
-        : "local-preset";
+    verificationSourceByState[verification?.verificationState] || "unverified-result";
 
   return {
     schema: "cyber-memory-cemetery/v0.1",
@@ -1273,15 +1274,22 @@ function buildArchivePayload(item, liveArchive, verification) {
 function renderArchivePanel(item, archiveSeal) {
   const providerLabel =
     archiveSeal ? archiveProviderCopy[archiveSeal.provider] || archiveSeal.provider : "待封存";
+  const permanent = CemeteryCore.isPermanentArchiveReceipt(archiveSeal);
+  const heading = permanent ? "永久档案封存" : archiveSeal ? "本地封存" : "档案封存";
+  const note = permanent
+    ? "档案已上传 IPFS 并获得 CID，可下载封存回执。"
+    : archiveSeal
+      ? "已生成本地可下载档案和内容哈希，不具备永久存储证明。"
+      : "点击后由服务端生成可下载档案和内容哈希。配置 Pinata JWT 后会上传 IPFS。";
   return `
     <div class="detail-section archive-panel">
-      <h4>永久档案封存</h4>
+      <h4>${heading}</h4>
       <p class="text-note">
-        点击后由服务端生成可下载档案、内容哈希和存储 ID。配置 Pinata JWT 后会真实上传 IPFS。
+        ${note}
       </p>
       <div class="archive-actions">
         <button class="button primary" type="button" data-action="seal-archive">
-          ${archiveSeal?.provider === "local-sealed" ? "重新上传 IPFS" : "生成永久档案"}
+          ${archiveSeal?.provider === "local-sealed" ? "重新上传 IPFS" : permanent ? "重新封存" : "封存档案"}
         </button>
         ${
           archiveSeal
@@ -1367,11 +1375,7 @@ function renderMemorial(item, liveArchive, verification) {
   const truthScore = verification?.truthScore || item.truthScore;
   const requests = verification?.requests || item.requests.map(normalizePresetRequest);
   const verificationSource =
-    verification?.source === "gonka"
-      ? "Gonka 实时验证"
-      : verification?.source === "mock"
-        ? "Gonka mock 兜底"
-        : "本地预置验证";
+    CemeteryCore.verificationResultCopy(verification);
   const archiveSeal = state.archiveSeals[item.id];
 
   detail.style.setProperty("--tomb-image", `url("${item.image}")`);
@@ -1425,7 +1429,7 @@ function renderMemorial(item, liveArchive, verification) {
       ${renderAgentLogPanel(item, requests, verificationSource)}
       ${renderArchivePanel(item, archiveSeal)}
       <div class="detail-section">
-        <h4>永久档案 JSON</h4>
+        <h4>${CemeteryCore.isPermanentArchiveReceipt(archiveSeal) ? "永久档案" : archiveSeal ? "本地封存" : "待封存档案"} JSON</h4>
         <ul class="request-list">
           <li>
             <strong>archive_payload</strong>
@@ -1488,7 +1492,7 @@ async function sealCurrentArchive() {
 
   renderMemorial(item, liveArchive, verification);
   const archiveSeal = state.archiveSeals[item.id];
-  const stateText = archiveSeal.provider === "pinata-ipfs" ? "已上传：IPFS" : "已封存：本地档案";
+  const stateText = archiveSeal.provider === "pinata-ipfs" ? "已上传：IPFS" : "本地封存";
   setAgentState(stateText);
 }
 
@@ -1562,7 +1566,7 @@ function generateMemorialCredential() {
   const current = state.currentMemorial;
   if (!current) return;
   const archiveSeal = state.archiveSeals[current.item.id];
-  if (!archiveSeal) {
+  if (!CemeteryCore.isStructurallyValidArchiveReceipt(archiveSeal)) {
     setAgentState("请先完成可验证封存");
     return;
   }
@@ -1737,8 +1741,7 @@ async function runAnalysis(event) {
   renderSteps(-1, steps.length);
   activateMuseumTab("exhibit");
   renderMemorial(item, liveArchive, verification);
-  const source = verification?.source === "gonka" ? "Gonka 实时验证" : "mock 兜底";
-  setAgentState(`已完成：${source}`);
+  setAgentState(CemeteryCore.verificationCompletionCopy(verification));
   state.running = false;
   byId("memorial").scrollIntoView({ behavior: "smooth", block: "start" });
 }

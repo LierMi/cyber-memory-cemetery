@@ -10,6 +10,26 @@ test("labels cached live results honestly", () => {
   assert.equal(result.verified, true);
 });
 
+test("completion copy is derived from verification state", () => {
+  const expected = {
+    live_consensus: "已完成：Gonka 实时共识",
+    cached_live: "已完成：Gonka 缓存结果",
+    partial: "已完成：Gonka 部分结果",
+    mock_fallback: "已完成：Gonka mock 兜底",
+    demo_fallback: "已完成：本地演示兜底",
+    unexpected: "已完成：未验证结果",
+  };
+
+  Object.entries(expected).forEach(([verificationState, copy]) => {
+    assert.equal(core.verificationCompletionCopy({ verificationState }), copy);
+  });
+  Object.keys(expected)
+    .filter((state) => state !== "live_consensus")
+    .forEach((verificationState) => {
+      assert.doesNotMatch(core.verificationCompletionCopy({ verificationState }), /实时|live/i);
+    });
+});
+
 test("credential is derived from the archive receipt", () => {
   const credential = core.createCredential(
     { id: "xiami", name: "虾米音乐", image: "./assets/case-xiami.png" },
@@ -51,11 +71,37 @@ test("readiness does not require Kite or a wallet", () => {
   const items = core.archiveReadiness({
     evidenceCount: 6,
     requestCount: 2,
-    archiveSeal: { contentHash: "sha256:abc" },
+    archiveSeal: {
+      provider: "pinata-ipfs",
+      archiveId: "ipfs://bafy-test",
+      contentHash: "sha256:abc",
+    },
     credential: { id: "witness-sha256abc" },
   });
   assert.deepEqual(items.map((item) => item.label), ["公开证据", "模型会诊", "永久封存", "纪念凭证"]);
   assert.equal(items.every((item) => item.ready), true);
+});
+
+test("local receipts enable credentials but not permanent storage readiness", () => {
+  const localReceipt = {
+    provider: "local-sealed",
+    archiveId: "local://sha256/abc",
+    contentHash: "sha256:abc",
+  };
+  const items = core.archiveReadiness({
+    evidenceCount: 6,
+    requestCount: 2,
+    archiveSeal: localReceipt,
+    credential: { id: "witness-sha256abc" },
+  });
+
+  assert.equal(core.isStructurallyValidArchiveReceipt(localReceipt), true);
+  assert.equal(items.find((item) => item.label === "永久封存").ready, false);
+  assert.equal(items.find((item) => item.label === "纪念凭证").ready, true);
+  assert.equal(
+    core.isStructurallyValidArchiveReceipt({ provider: "local-sealed", contentHash: "sha256:abc" }),
+    false,
+  );
 });
 
 test("NFT-ready metadata describes a future claim, not a mint", () => {
@@ -70,6 +116,50 @@ test("NFT-ready metadata describes a future claim, not a mint", () => {
   const metadata = core.createNftReadyMetadata(credential, { image: "./assets/case-xiami.png" });
   assert.equal(metadata.attributes.find((item) => item.trait_type === "Claim Status").value, "Pending on-chain claim");
   assert.equal(metadata.attributes.find((item) => item.trait_type === "Archive Hash").value, "sha256:abc");
+});
+
+test("NFT-ready metadata recursively excludes mint and ownership fields and traits", () => {
+  const credential = {
+    id: "witness-sha256abc",
+    name: "Cyber Memory Witness - 虾米音乐",
+    contentHash: "sha256:abc",
+    archiveId: "ipfs://cid",
+    truthScore: 89,
+    verificationState: "live_consensus",
+    transactionHash: "0xtransaction",
+    tokenId: "123",
+    owner: "0xowner",
+    mintReceipt: { transactionHash: "0xnested" },
+    attributes: [
+      { trait_type: "Transaction Hash", value: "0xtrait" },
+      { trait_type: "Token ID", value: "456" },
+      { trait_type: "Owner", value: "0xtrait-owner" },
+      { trait_type: "Mint Receipt", value: "receipt-trait" },
+    ],
+  };
+  const metadata = core.createNftReadyMetadata(credential, {
+    image: "./assets/case-xiami.png",
+    owner: "0xitem-owner",
+  });
+  const prohibited = /transactionhash|tokenid|owner|mintreceipt/;
+
+  function assertRecursivelyClean(value) {
+    if (Array.isArray(value)) {
+      value.forEach(assertRecursivelyClean);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    Object.entries(value).forEach(([key, nested]) => {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, "");
+      assert.doesNotMatch(normalizedKey, prohibited);
+      if (key === "trait_type") {
+        assert.doesNotMatch(String(nested).toLowerCase().replace(/[^a-z]/g, ""), prohibited);
+      }
+      assertRecursivelyClean(nested);
+    });
+  }
+
+  assertRecursivelyClean(metadata);
 });
 
 test("demo state stops on failure and resumes on retry", () => {

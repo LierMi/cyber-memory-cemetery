@@ -7,11 +7,28 @@
     live_consensus: { label: "LIVE CONSENSUS", verified: true, tone: "verified" },
     cached_live: { label: "CACHED LIVE", verified: true, tone: "cached" },
     partial: { label: "PARTIAL", verified: false, tone: "warning" },
+    mock_fallback: { label: "MOCK FALLBACK", verified: false, tone: "mock" },
     demo_fallback: { label: "DEMO FALLBACK", verified: false, tone: "mock" },
+  };
+
+  const verificationResultCopyByState = {
+    live_consensus: "Gonka 实时共识",
+    cached_live: "Gonka 缓存结果",
+    partial: "Gonka 部分结果",
+    mock_fallback: "Gonka mock 兜底",
+    demo_fallback: "本地演示兜底",
   };
 
   function verificationPresentation(verification) {
     return states[verification?.verificationState] || states.demo_fallback;
+  }
+
+  function verificationResultCopy(verification) {
+    return verificationResultCopyByState[verification?.verificationState] || "未验证结果";
+  }
+
+  function verificationCompletionCopy(verification) {
+    return `已完成：${verificationResultCopy(verification)}`;
   }
 
   function createCredential(item, seal) {
@@ -160,11 +177,30 @@
     };
   }
 
+  function isStructurallyValidArchiveReceipt(archiveSeal) {
+    return Boolean(
+      archiveSeal &&
+        typeof archiveSeal === "object" &&
+        typeof archiveSeal.contentHash === "string" &&
+        archiveSeal.contentHash.startsWith("sha256:") &&
+        typeof archiveSeal.archiveId === "string" &&
+        archiveSeal.archiveId.length,
+    );
+  }
+
+  function isPermanentArchiveReceipt(archiveSeal) {
+    return Boolean(
+      isStructurallyValidArchiveReceipt(archiveSeal) &&
+        archiveSeal.provider === "pinata-ipfs" &&
+        /^ipfs:\/\/[^/\s]+$/.test(archiveSeal.archiveId),
+    );
+  }
+
   function archiveReadiness({ evidenceCount, requestCount, archiveSeal, credential }) {
     return [
       { label: "公开证据", ready: evidenceCount > 0 },
       { label: "模型会诊", ready: requestCount >= 2 },
-      { label: "永久封存", ready: Boolean(archiveSeal) },
+      { label: "永久封存", ready: isPermanentArchiveReceipt(archiveSeal) },
       { label: "纪念凭证", ready: Boolean(credential) },
     ];
   }
@@ -179,11 +215,15 @@
 
   return {
     verificationPresentation,
+    verificationResultCopy,
+    verificationCompletionCopy,
     createCredential,
     createNftReadyMetadata,
     archiveCommunitySummary,
     sha256Hex,
     createLocalArchiveSeal,
+    isStructurallyValidArchiveReceipt,
+    isPermanentArchiveReceipt,
     archiveReadiness,
     nextDemoState,
   };
