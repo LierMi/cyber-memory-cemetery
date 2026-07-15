@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,6 +20,118 @@ class VerificationCacheTests(unittest.TestCase):
             }
             cache.write("abc", value)
             self.assertEqual(cache.read("abc")["requests"][0]["requestId"], "gonka-1")
+
+    def test_latest_for_case_skips_malformed_and_unreadable_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = VerificationCache(Path(directory))
+            cache.write(
+                "valid",
+                {
+                    "caseId": "xiami",
+                    "verificationState": "live_consensus",
+                    "verifiedAt": "2026-07-15T12:00:00Z",
+                    "requests": [],
+                },
+            )
+            (Path(directory) / "invalid.json").write_text("{not json", encoding="utf-8")
+            (Path(directory) / "array.json").write_text("[]", encoding="utf-8")
+            (Path(directory) / "malformed.json").write_text(
+                json.dumps(
+                    {
+                        "caseId": ["xiami"],
+                        "verificationState": "live_consensus",
+                        "requests": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            unreadable = Path(directory) / "unreadable.json"
+            unreadable.write_text("{}", encoding="utf-8")
+            original_read_text = Path.read_text
+
+            def read_text(path, *args, **kwargs):
+                if path == unreadable:
+                    raise OSError("permission denied")
+                return original_read_text(path, *args, **kwargs)
+
+            with patch.object(Path, "read_text", new=read_text):
+                result = cache.latest_for_case("xiami")
+
+        self.assertEqual(result["verifiedAt"], "2026-07-15T12:00:00Z")
+
+    def test_latest_for_case_breaks_equal_timestamps_by_filename(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = VerificationCache(Path(directory))
+            for key in ("alpha", "beta"):
+                cache.write(
+                    key,
+                    {
+                        "caseId": "xiami",
+                        "verificationState": "live_consensus",
+                        "verifiedAt": "2026-07-15T12:00:00Z",
+                        "requests": [],
+                        "cacheKey": key,
+                    },
+                )
+
+            result = cache.latest_for_case("xiami")
+
+        self.assertEqual(result["cacheKey"], "beta")
+
+    def test_latest_for_case_treats_missing_or_non_string_timestamps_as_oldest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = VerificationCache(Path(directory))
+            cache.write(
+                "missing",
+                {
+                    "caseId": "xiami",
+                    "verificationState": "live_consensus",
+                    "requests": [],
+                    "cacheKey": "missing",
+                },
+            )
+            cache.write(
+                "numeric",
+                {
+                    "caseId": "xiami",
+                    "verificationState": "live_consensus",
+                    "verifiedAt": 123,
+                    "requests": [],
+                    "cacheKey": "numeric",
+                },
+            )
+            cache.write(
+                "dated",
+                {
+                    "caseId": "xiami",
+                    "verificationState": "live_consensus",
+                    "verifiedAt": "2026-07-15T12:00:00Z",
+                    "requests": [],
+                    "cacheKey": "dated",
+                },
+            )
+
+            result = cache.latest_for_case("xiami")
+
+        self.assertEqual(result["cacheKey"], "dated")
+
+    def test_concurrent_same_key_writes_are_atomic_and_leave_no_temporary_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = VerificationCache(Path(directory))
+
+            def write(index):
+                cache.write("shared", {"writer": index, "requests": []})
+
+            with ThreadPoolExecutor(max_workers=12) as executor:
+                futures = [executor.submit(write, index) for index in range(24)]
+                errors = [future.exception() for future in futures]
+
+            final_payload = json.loads((Path(directory) / "shared.json").read_text(encoding="utf-8"))
+            temporary_files = list(Path(directory).glob("*.tmp"))
+
+        self.assertEqual(errors, [None] * 24)
+        self.assertIn(final_payload["writer"], range(24))
+        self.assertEqual(temporary_files, [])
 
     def test_two_failed_models_use_real_cache(self):
         cached = {
