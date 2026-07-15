@@ -22,6 +22,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -356,6 +360,110 @@ a:focus-visible {
 
 .button.full {
   width: 100%;
+}
+
+.button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.demo-flow {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 22px 0;
+}
+
+.demo-flow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.demo-flow-head h2,
+.demo-flow-head p {
+  margin-bottom: 0;
+}
+
+.demo-flow-head h2 {
+  font-size: 20px;
+}
+
+.demo-flow-head p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.demo-progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 1px;
+  list-style: none;
+  background: var(--line);
+}
+
+.demo-progress li {
+  height: 52px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: var(--surface);
+}
+
+.demo-progress span,
+.demo-progress em {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.demo-progress span,
+.demo-progress em {
+  color: var(--faint);
+}
+
+.demo-progress strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.demo-progress li[data-status="running"] {
+  background: rgba(196, 136, 42, 0.08);
+}
+
+.demo-progress li[data-status="running"] span,
+.demo-progress li[data-status="running"] em,
+.demo-progress li[data-status="done"] span,
+.demo-progress li[data-status="done"] em {
+  color: var(--accent-strong);
+}
+
+.demo-progress li[data-status="failed"] span,
+.demo-progress li[data-status="failed"] em {
+  color: var(--danger);
+}
+
+@media (max-width: 700px) {
+  .demo-flow-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .demo-flow-head .button {
+    width: 100%;
+  }
+
+  .demo-progress {
+    grid-template-columns: 1fr;
+  }
 }
 
 .hero-visual {

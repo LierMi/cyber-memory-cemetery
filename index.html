@@ -99,6 +99,9 @@
                 Agent 搜索网页残骸，交叉验真，再生成可审计的数字墓碑。
               </p>
               <div class="hero-actions">
+                <button class="button primary" type="button" data-action="run-demo">
+                  一键演示
+                </button>
                 <button class="button primary" type="button" data-museum-tab="console">
                   开始建碑
                 </button>
@@ -119,6 +122,26 @@
                 Truth Score / Gonka Request ID / Permanent Archive
               </figcaption>
             </figure>
+          </section>
+
+          <section class="demo-flow" aria-labelledby="demoFlowTitle">
+            <div class="demo-flow-head">
+              <div>
+                <h2 id="demoFlowTitle">虾米演示进度</h2>
+                <p data-demo-summary>等待开始</p>
+              </div>
+              <button class="button secondary" type="button" data-action="retry-demo" hidden>
+                从失败步骤重试
+              </button>
+            </div>
+            <ol id="demoProgress" class="demo-progress" aria-live="polite">
+              <li data-demo-step="0" data-status="pending"><span>01</span><strong>选择虾米</strong><em>待运行</em></li>
+              <li data-demo-step="1" data-status="pending"><span>02</span><strong>加载证据</strong><em>待运行</em></li>
+              <li data-demo-step="2" data-status="pending"><span>03</span><strong>查询 Wayback</strong><em>待运行</em></li>
+              <li data-demo-step="3" data-status="pending"><span>04</span><strong>运行会诊</strong><em>待运行</em></li>
+              <li data-demo-step="4" data-status="pending"><span>05</span><strong>封存档案</strong><em>待运行</em></li>
+              <li data-demo-step="5" data-status="pending"><span>06</span><strong>生成凭证</strong><em>待运行</em></li>
+            </ol>
           </section>
 
           <section id="memorial" class="memorial">

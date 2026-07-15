@@ -381,6 +381,8 @@ const cases = [
 const state = {
   selectedId: "xiami",
   running: false,
+  demo: { step: 0, status: "idle" },
+  demoResults: {},
   currentMemorial: null,
   archiveSeals: {},
   archivePayloads: {},
@@ -787,7 +789,7 @@ function renderCredentialPanel(item, archiveSeal) {
             </button>
             ${
               credential
-                ? `<button class="button secondary" type="button" data-action="download-credential">下载凭证 JSON</button>
+                ? `<button class="button secondary" type="button" data-action="download-credential">下载纪念凭证</button>
                    <button class="button secondary" type="button" data-action="download-credential-metadata">下载链上兼容 metadata</button>`
                 : ""
             }
@@ -1065,7 +1067,7 @@ function renderConsoleWorkbench(item, liveArchive, verification, requests, verif
           <code>${escapeHtml(verificationSource)}</code>
         </div>
       </div>
-      <div class="verification-summary-grid">
+      <div class="verification-summary-grid" data-verification-state>
         ${renderVerificationState(verification)}
         ${renderConsensusMeter(verification)}
       </div>
@@ -1282,7 +1284,7 @@ function renderArchivePanel(item, archiveSeal) {
       ? "已生成本地可下载档案和内容哈希，不具备永久存储证明。"
       : "点击后由服务端生成可下载档案和内容哈希。配置 Pinata JWT 后会上传 IPFS。";
   return `
-    <div class="detail-section archive-panel">
+    <div class="detail-section archive-panel" data-archive-status>
       <h4>${heading}</h4>
       <p class="text-note">
         ${note}
@@ -1644,6 +1646,109 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function withTimeout(promise, timeoutMs) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`步骤超时（${timeoutMs}ms）`)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function advanceDemo() {
+  state.demo = CemeteryCore.nextDemoState(state.demo, "complete");
+  renderDemoProgress();
+}
+
+function renderDemoProgress() {
+  const labels = {
+    pending: "待运行",
+    running: "运行中",
+    done: "已完成",
+    failed: "失败",
+  };
+  document.querySelectorAll("[data-demo-step]").forEach((row) => {
+    const index = Number(row.getAttribute("data-demo-step"));
+    let status = "pending";
+    if (index < state.demo.step || state.demo.status === "complete") status = "done";
+    if (state.demo.status === "running" && index === state.demo.step) status = "running";
+    if (state.demo.status === "failed" && index === state.demo.step) status = "failed";
+    row.setAttribute("data-status", status);
+    row.querySelector("em").textContent = labels[status];
+  });
+
+  const summary = document.querySelector("[data-demo-summary]");
+  const retryButton = document.querySelector("[data-action='retry-demo']");
+  const runButton = document.querySelector("[data-action='run-demo']");
+  if (state.demo.status === "failed") {
+    summary.textContent = state.demo.error || "演示中断";
+  } else if (state.demo.status === "complete") {
+    summary.textContent = "档案与纪念凭证已就绪";
+  } else if (state.demo.status === "running") {
+    summary.textContent = `正在执行第 ${state.demo.step + 1} 步`;
+  } else {
+    summary.textContent = "等待开始";
+  }
+  retryButton.hidden = state.demo.status !== "failed";
+  runButton.disabled = state.running;
+}
+
+async function runDemoFlow() {
+  if (state.running) return;
+  const retrying = state.demo.status === "failed";
+  state.demo = retrying
+    ? CemeteryCore.nextDemoState(state.demo, "retry")
+    : { step: 0, status: "running" };
+  if (!retrying) state.demoResults = {};
+  delete state.demo.error;
+  state.running = true;
+  renderDemoProgress();
+
+  try {
+    const item = cases.find((entry) => entry.id === "xiami");
+    if (state.demo.step === 0) {
+      selectCase("xiami");
+      state.demoResults.item = item;
+      advanceDemo();
+    }
+    if (state.demo.step === 1) {
+      state.demoResults.evidencePackage = await withTimeout(loadEvidencePackage("xiami"), 5000);
+      advanceDemo();
+    }
+    if (state.demo.step === 2) {
+      state.demoResults.liveArchive = await withTimeout(lookupWayback("https://www.xiami.com"), 8000);
+      advanceDemo();
+    }
+    if (state.demo.step === 3) {
+      state.demoResults.verification = await withTimeout(
+        verifyWithGonka(item, state.demoResults.liveArchive, state.demoResults.evidencePackage),
+        45000,
+      );
+      advanceDemo();
+    }
+    if (state.demo.step === 4) {
+      renderMemorial(item, state.demoResults.liveArchive, state.demoResults.verification);
+      await sealCurrentArchive();
+      advanceDemo();
+    }
+    if (state.demo.step === 5) {
+      generateMemorialCredential();
+      if (!state.credentials.xiami) throw new Error("纪念凭证生成失败");
+      advanceDemo();
+    }
+    state.demo = CemeteryCore.nextDemoState(state.demo, "finish");
+    renderDemoProgress();
+    activateMuseumTab("exhibit");
+    byId("memorial").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (error) {
+    state.demo = CemeteryCore.nextDemoState(state.demo, "failure");
+    state.demo.error = error.message;
+    renderDemoProgress();
+  } finally {
+    state.running = false;
+    renderDemoProgress();
+  }
+}
+
 async function lookupWayback(url) {
   const normalized = url.trim();
   if (!normalized || !normalized.includes(".")) return null;
@@ -1692,7 +1797,7 @@ async function loadEvidencePackage(caseId) {
   return payload;
 }
 
-async function verifyWithGonka(item, liveArchive) {
+async function verifyWithGonka(item, liveArchive, evidencePackage) {
   try {
     const response = await fetch("/api/gonka/verify", {
       method: "POST",
@@ -1750,6 +1855,7 @@ function init() {
   renderCases();
   renderOptions();
   renderSteps();
+  renderDemoProgress();
   selectCase("xiami");
   byId("analysisForm").addEventListener("submit", runAnalysis);
   document.querySelectorAll("[data-entry-action]").forEach((button) => {
@@ -1793,6 +1899,9 @@ function init() {
     }
     if (action === "download-archive") {
       downloadCurrentArchive();
+    }
+    if (action === "run-demo" || action === "retry-demo") {
+      await runDemoFlow();
     }
   });
   document.addEventListener("submit", (event) => {

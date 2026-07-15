@@ -1,0 +1,11 @@
+{
+  "name": "cyber-memory-cemetery",
+  "private": true,
+  "scripts": {
+    "test:core": "node --test tests/core.test.cjs",
+    "test:browser": "playwright test tests/browser-smoke.mjs --reporter=line"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}
