@@ -1403,27 +1403,6 @@ function stableJson(value) {
   return JSON.stringify(sortKeys(value), null, 2);
 }
 
-function canonicalArchiveJson(value) {
-  return JSON.stringify(sortKeys(value));
-}
-
-async function sha256Hex(text) {
-  if (!globalThis.crypto?.subtle) {
-    let fallback = "";
-    let index = 0;
-    while (fallback.length < 64) {
-      fallback += shortId(`${index}:${text}`, 8);
-      index += 1;
-    }
-    return fallback.slice(0, 64);
-  }
-  const bytes = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 function buildArchivePayload(item, liveArchive, verification) {
   const archiveCount = liveArchive?.count || item.archiveCount;
   const firstSeen = liveArchive?.firstYear || item.firstSeen;
@@ -1469,9 +1448,7 @@ function buildArchivePayload(item, liveArchive, verification) {
       privacyBoundary: item.privacyBoundary || "public metadata only",
     },
     community: {
-      flowers: actions.flowers,
-      candles: actions.candles,
-      messages: actions.messages,
+      ...CemeteryCore.archiveCommunitySummary(actions),
     },
     memorialDesign: {
       template: "digital-pompeii-dark-museum",
@@ -1743,54 +1720,11 @@ async function sealCurrentArchive() {
     }
     state.archiveSeals[item.id] = seal;
   } catch (error) {
-    const canonical = canonicalArchiveJson(basePayload);
-    const hash = await sha256Hex(canonical);
-    const contentHash = `sha256:${hash}`;
-    const archiveId = `local://sha256/${hash}`;
-    const filename = `cyber-memory-${item.id}-${hash.slice(0, 10)}.json`;
-    const fallbackRecord = {
-      schema: "cyber-memory-cemetery/sealed/v0.1",
-      archive: basePayload,
-      receipt: {
-        provider: "local-sealed",
-        status: "browser-fallback",
-        contentHash,
-        archiveId,
-        sealedAt: new Date().toISOString(),
-        sealEligibility:
-          basePayload.verification.verificationState === "live_consensus" ||
-          basePayload.verification.verificationState === "cached_live"
-            ? "verified"
-            : "draft",
-        notes: [`服务端封存失败，已使用浏览器本地封存：${error.message}`],
-      },
-    };
-    state.archiveSeals[item.id] = {
-      provider: "local-sealed",
-      status: "browser-fallback",
-      archiveId,
-      contentHash,
-      contentCreatedAt: basePayload.contentCreatedAt,
-      verificationState: basePayload.verification.verificationState,
-      truthScore: basePayload.verification.truthScore,
-      requestIds: basePayload.verification.requests.map((request) => request.requestId).filter(Boolean),
-      filename,
-      json: stableJson(fallbackRecord),
-      previewJson: JSON.stringify(
-        {
-          id: item.id,
-          url: item.originalUrl,
-          truthScore: basePayload.verification.truthScore,
-          provider: "local-sealed",
-          status: "browser-fallback",
-          contentHash,
-          archiveId,
-        },
-        null,
-        2,
-      ),
-      notes: [`服务端封存失败，已使用浏览器本地封存：${error.message}`],
-    };
+    state.archiveSeals[item.id] = await CemeteryCore.createLocalArchiveSeal(basePayload, {
+      cryptoProvider: globalThis.crypto,
+      sealedAt: new Date().toISOString(),
+      errorMessage: error.message,
+    });
   }
 
   renderMemorial(item, liveArchive, verification);
@@ -1872,7 +1806,7 @@ async function claimWitnessNft() {
   const createdAt = new Date().toISOString();
   const metadata = buildNftMetadata(current.item, owner);
   const tokenSeed = stableJson({ caseId: current.item.id, owner, createdAt, metadata });
-  const tokenHash = await sha256Hex(tokenSeed);
+  const tokenHash = await CemeteryCore.sha256Hex(tokenSeed, globalThis.crypto);
   const tokenId = `cmc-${current.item.id}-${tokenHash.slice(0, 12)}`;
   state.nftClaims[current.item.id] = {
     tokenId,

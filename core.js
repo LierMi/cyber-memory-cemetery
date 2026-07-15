@@ -32,6 +32,119 @@
     };
   }
 
+  function archiveCommunitySummary(actions) {
+    const messages = Array.isArray(actions?.messages) ? actions.messages : [];
+    return {
+      flowers: nonNegativeInteger(actions?.flowers),
+      candles: nonNegativeInteger(actions?.candles),
+      messageCount: messages.length,
+      commentContentArchived: false,
+    };
+  }
+
+  function nonNegativeInteger(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : 0;
+  }
+
+  function sortKeys(value) {
+    if (Array.isArray(value)) return value.map(sortKeys);
+    if (value && typeof value === "object") {
+      return Object.keys(value)
+        .sort()
+        .reduce((result, key) => {
+          result[key] = sortKeys(value[key]);
+          return result;
+        }, {});
+    }
+    return value;
+  }
+
+  function canonicalJson(value) {
+    return JSON.stringify(sortKeys(value));
+  }
+
+  async function sha256Hex(text, cryptoProvider) {
+    const subtle = cryptoProvider?.subtle;
+    if (!subtle || typeof subtle.digest !== "function") {
+      throw new Error("SubtleCrypto is unavailable; cannot create SHA-256");
+    }
+
+    const digest = await subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  async function createLocalArchiveSeal(payload, options = {}) {
+    const contentHash = `sha256:${await sha256Hex(canonicalJson(payload), options.cryptoProvider)}`;
+    const digest = contentHash.split(":")[1];
+    const verification = payload?.verification || {};
+    const verificationState = verification.verificationState || "demo_fallback";
+    const requestIds = Array.isArray(verification.requests)
+      ? verification.requests
+          .filter((request) => request && typeof request === "object" && request.requestId)
+          .map((request) => request.requestId)
+      : [];
+    const archiveId = `local://sha256/${digest}`;
+    const sealEligibility =
+      verificationState === "live_consensus" || verificationState === "cached_live"
+        ? "verified"
+        : "draft";
+    const notes = options.errorMessage ? [`服务端封存失败，已使用浏览器本地封存：${options.errorMessage}`] : [];
+    const filename =
+      options.filename || `cyber-memory-${payload?.case?.id || "memorial"}-${digest.slice(0, 10)}.json`;
+    const receipt = {
+      provider: "local-sealed",
+      status: "browser-fallback",
+      contentHash,
+      archiveId,
+      gatewayUrl: "",
+      sealedAt: options.sealedAt,
+      sealEligibility,
+    };
+    if (notes.length) receipt.notes = notes;
+    const preview = {
+      id: payload?.case?.id,
+      url: payload?.case?.originalUrl,
+      truthScore: verification.truthScore,
+      contentCreatedAt: payload?.contentCreatedAt,
+      verificationState,
+      requestIds,
+      provider: receipt.provider,
+      status: receipt.status,
+      contentHash,
+      archiveId,
+      gatewayUrl: "",
+      sealEligibility,
+    };
+
+    return {
+      provider: receipt.provider,
+      status: receipt.status,
+      archiveId,
+      contentHash,
+      gatewayUrl: "",
+      sealEligibility,
+      contentCreatedAt: payload?.contentCreatedAt,
+      verificationState,
+      truthScore: verification.truthScore,
+      requestIds,
+      filename,
+      json: JSON.stringify(
+        {
+          schema: "cyber-memory-cemetery/sealed/v0.1",
+          archive: payload,
+          receipt,
+        },
+        null,
+        2,
+      ),
+      previewJson: JSON.stringify(preview, null, 2),
+      notes,
+    };
+  }
+
   function archiveReadiness({ evidenceCount, requestCount, archiveSeal, credential }) {
     return [
       { label: "公开证据", ready: evidenceCount > 0 },
@@ -49,5 +162,13 @@
     return state;
   }
 
-  return { verificationPresentation, createCredential, archiveReadiness, nextDemoState };
+  return {
+    verificationPresentation,
+    createCredential,
+    archiveCommunitySummary,
+    sha256Hex,
+    createLocalArchiveSeal,
+    archiveReadiness,
+    nextDemoState,
+  };
 });

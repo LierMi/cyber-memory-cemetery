@@ -82,6 +82,22 @@ class ArchiveSealTests(unittest.TestCase):
         self.assertTrue(result["archiveId"].startswith("local://sha256/"))
         self.assertNotIn("ar://demo", result["archiveId"])
 
+    def test_pinata_response_without_cid_returns_a_retryable_local_receipt(self):
+        payload = self.archive_payload()
+        with patch.object(server, "PINATA_JWT", "test-jwt"), patch.object(
+            server, "upload_pinata_json", return_value={}
+        ):
+            result = server.seal_archive({"payload": payload})
+        with patch.object(server, "PINATA_JWT", ""):
+            local_result = server.seal_archive({"payload": payload})
+
+        self.assertEqual(result["provider"], "local-sealed")
+        self.assertEqual(result["status"], "pinata-response-missing-cid")
+        self.assertEqual(result["archiveId"], local_result["archiveId"])
+        self.assertEqual(result["contentHash"], local_result["contentHash"])
+        self.assertEqual(result["gatewayUrl"], "")
+        self.assertTrue(result["notes"])
+
     def test_status_endpoint_reports_service_state_without_secrets(self):
         handler = object.__new__(server.Handler)
         handler.path = "/api/status"
@@ -99,8 +115,8 @@ class ArchiveSealTests(unittest.TestCase):
     def test_browser_fallback_uses_the_frozen_payload_canonical_hash(self):
         source = Path("app.js").read_text(encoding="utf-8")
 
-        self.assertIn("function canonicalArchiveJson(value)", source)
-        self.assertIn("const canonical = canonicalArchiveJson(basePayload);", source)
+        self.assertIn("CemeteryCore.createLocalArchiveSeal", source)
+        self.assertIn("CemeteryCore.sha256Hex", source)
         self.assertIn('"local-sealed": "本地封存，不具备永久存储证明"', source)
         self.assertNotIn('provider: "demo-local"', source)
         self.assertNotIn("ar://demo", source)

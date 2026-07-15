@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { webcrypto } = require("node:crypto");
 const core = require("../core.js");
 
 test("labels cached live results honestly", () => {
@@ -50,4 +51,60 @@ test("demo state stops on failure and resumes on retry", () => {
   assert.deepEqual(failed, { step: 2, status: "failed" });
   const retried = core.nextDemoState(failed, "retry");
   assert.deepEqual(retried, { step: 2, status: "running" });
+});
+
+test("archive community summary excludes guestbook identities and messages", () => {
+  const summary = core.archiveCommunitySummary({
+    flowers: 4,
+    candles: 2,
+    messages: [{ name: "private-witness", text: "private-message" }],
+  });
+
+  assert.deepEqual(summary, {
+    flowers: 4,
+    candles: 2,
+    messageCount: 1,
+    commentContentArchived: false,
+  });
+  assert.doesNotMatch(JSON.stringify(summary), /private-witness|private-message/);
+});
+
+test("local archive fallback provides a credential-ready receipt", async () => {
+  const payload = {
+    case: { id: "xiami", originalUrl: "https://www.xiami.com" },
+    contentCreatedAt: "2026-07-15T12:00:00Z",
+    verification: {
+      verificationState: "cached_live",
+      truthScore: 87,
+      requests: [{ requestId: "gonka-a" }, { requestId: "gonka-b" }],
+    },
+  };
+
+  const seal = await core.createLocalArchiveSeal(payload, {
+    cryptoProvider: webcrypto,
+    filename: "xiami.json",
+    sealedAt: "2026-07-15T12:01:00Z",
+    errorMessage: "offline",
+  });
+
+  assert.equal(seal.provider, "local-sealed");
+  assert.equal(seal.gatewayUrl, "");
+  assert.equal(seal.sealEligibility, "verified");
+  assert.equal(seal.contentCreatedAt, payload.contentCreatedAt);
+  assert.equal(seal.verificationState, "cached_live");
+  assert.equal(seal.truthScore, 87);
+  assert.deepEqual(seal.requestIds, ["gonka-a", "gonka-b"]);
+  assert.match(seal.archiveId, /^local:\/\/sha256\/[a-f0-9]{64}$/);
+  assert.equal(core.createCredential(payload.case, seal).issuedAt, payload.contentCreatedAt);
+});
+
+test("sha256Hex uses SubtleCrypto for the known SHA-256 vector", async () => {
+  assert.equal(
+    await core.sha256Hex("abc", webcrypto),
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+  );
+});
+
+test("sha256Hex rejects when SubtleCrypto is unavailable", async () => {
+  await assert.rejects(core.sha256Hex("abc", {}), /SubtleCrypto is unavailable/);
 });
