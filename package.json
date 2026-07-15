@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "test:core": "node --test tests/core.test.cjs",
-    "test:browser": "playwright test tests/browser-smoke.mjs --reporter=line"
+    "test:browser": "env -u FORCE_COLOR -u NO_COLOR playwright test tests/browser-smoke.mjs --reporter=line"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0"

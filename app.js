@@ -37,6 +37,7 @@ const defaultRelics = [
 ];
 
 const evidencePackages = new Map();
+const evidencePackagePromises = new Map();
 
 const cases = [
   {
@@ -383,6 +384,7 @@ const state = {
   running: false,
   demo: { step: 0, status: "idle" },
   demoResults: {},
+  demoOperations: {},
   currentMemorial: null,
   archiveSeals: {},
   archivePayloads: {},
@@ -472,7 +474,7 @@ function renderCases() {
   grid.querySelectorAll("[data-case-id]").forEach((card) => {
     const openCase = () => {
       const id = card.getAttribute("data-case-id");
-      selectCase(id);
+      if (!selectCase(id)) return;
       activateMuseumTab("exhibit");
       byId("memorial").scrollIntoView({ behavior: "smooth", block: "start" });
     };
@@ -1345,7 +1347,9 @@ function renderOptions() {
     .join("");
   select.value = state.selectedId;
   select.addEventListener("change", () => {
-    selectCase(select.value, true);
+    if (!selectCase(select.value, true)) {
+      select.value = state.selectedId;
+    }
   });
 }
 
@@ -1457,11 +1461,55 @@ function renderMemorial(item, liveArchive, verification) {
     </div>
   `;
   renderMuseumWorkbenches(item, liveArchive, verification, requests, verificationSource);
+  renderInteractionLocks();
 }
 
-async function sealCurrentArchive() {
+function setDemoInteractionLock(element, locked) {
+  if (locked) {
+    if (!element.hasAttribute("data-demo-lock-disabled")) {
+      element.dataset.demoLockDisabled = element.disabled ? "true" : "false";
+    }
+    element.disabled = true;
+    return;
+  }
+
+  if (element.hasAttribute("data-demo-lock-disabled")) {
+    element.disabled = element.dataset.demoLockDisabled === "true";
+    delete element.dataset.demoLockDisabled;
+  }
+}
+
+function renderInteractionLocks() {
+  const locked = state.running;
+  const controls = document.querySelectorAll([
+    "#caseSelect",
+    "#urlInput",
+    "#analysisForm button[type='submit']",
+    "[data-action='seal-archive']",
+    "[data-action='generate-credential']",
+    "[data-action='offer-flower']",
+    "[data-action='light-candle']",
+    "[data-action='guestbook-submit'] button",
+    "[data-action='guestbook-submit'] input",
+    "[data-action='guestbook-submit'] textarea",
+  ].join(", "));
+
+  controls.forEach((control) => setDemoInteractionLock(control, locked));
+  document.querySelectorAll("[data-case-id]").forEach((caseCard) => {
+    if (locked) {
+      caseCard.setAttribute("aria-disabled", "true");
+      caseCard.setAttribute("tabindex", "-1");
+    } else {
+      caseCard.removeAttribute("aria-disabled");
+      caseCard.setAttribute("tabindex", "0");
+    }
+  });
+}
+
+async function sealCurrentArchive(allowWhileRunning = false) {
+  if (state.running && !allowWhileRunning) return false;
   const current = state.currentMemorial;
-  if (!current) return;
+  if (!current) return false;
 
   const { item, liveArchive, verification } = current;
   setAgentState("封存中");
@@ -1496,6 +1544,7 @@ async function sealCurrentArchive() {
   const archiveSeal = state.archiveSeals[item.id];
   const stateText = archiveSeal.provider === "pinata-ipfs" ? "已上传：IPFS" : "本地封存";
   setAgentState(stateText);
+  return true;
 }
 
 function downloadCurrentArchive() {
@@ -1529,30 +1578,35 @@ function invalidateArchive(caseId) {
 }
 
 function addFlower() {
+  if (state.running) return false;
   const current = state.currentMemorial;
-  if (!current) return;
+  if (!current) return false;
   getActions(current.item.id).flowers += 1;
   invalidateArchive(current.item.id);
   refreshCurrentMemorial();
   setAgentState("已献花");
+  return true;
 }
 
 function lightCandle() {
+  if (state.running) return false;
   const current = state.currentMemorial;
-  if (!current) return;
+  if (!current) return false;
   getActions(current.item.id).candles += 1;
   invalidateArchive(current.item.id);
   refreshCurrentMemorial();
   setAgentState("已点灯");
+  return true;
 }
 
 function submitGuestbook(form) {
+  if (state.running) return false;
   const current = state.currentMemorial;
-  if (!current) return;
+  if (!current) return false;
   const data = new FormData(form);
   const name = String(data.get("guestName") || "anonymous_witness").trim();
   const text = String(data.get("guestMessage") || "").trim();
-  if (!text) return;
+  if (!text) return false;
 
   getActions(current.item.id).messages.push({
     name: name || "anonymous_witness",
@@ -1562,20 +1616,23 @@ function submitGuestbook(form) {
   invalidateArchive(current.item.id);
   refreshCurrentMemorial();
   setAgentState("纪念册已更新");
+  return true;
 }
 
-function generateMemorialCredential() {
+function generateMemorialCredential(allowWhileRunning = false) {
+  if (state.running && !allowWhileRunning) return false;
   const current = state.currentMemorial;
-  if (!current) return;
+  if (!current) return false;
   const archiveSeal = state.archiveSeals[current.item.id];
   if (!CemeteryCore.isStructurallyValidArchiveReceipt(archiveSeal)) {
     setAgentState("请先完成可验证封存");
-    return;
+    return false;
   }
 
   state.credentials[current.item.id] = CemeteryCore.createCredential(current.item, archiveSeal);
   refreshCurrentMemorial();
   setAgentState("已生成：纪念凭证");
+  return true;
 }
 
 function downloadJsonArtifact(filename, value) {
@@ -1611,7 +1668,8 @@ function downloadCredentialMetadata() {
   setAgentState("已下载：链上兼容 metadata");
 }
 
-function selectCase(id, updateInput = true) {
+function selectCase(id, updateInput = true, allowWhileRunning = false) {
+  if (state.running && !allowWhileRunning) return false;
   const item = cases.find((entry) => entry.id === id) || cases[0];
   state.selectedId = item.id;
   byId("caseSelect").value = item.id;
@@ -1625,6 +1683,7 @@ function selectCase(id, updateInput = true) {
       if (evidencePackage && state.currentMemorial?.item.id === item.id) refreshCurrentMemorial();
     })
     .catch(() => {});
+  return true;
 }
 
 function setAgentState(text) {
@@ -1654,8 +1713,23 @@ function withTimeout(promise, timeoutMs) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
+function runDemoOperation(step, operation) {
+  if (state.demoOperations[step]) return state.demoOperations[step];
+
+  const operationPromise = Promise.resolve().then(operation);
+  state.demoOperations[step] = operationPromise;
+  operationPromise.catch(() => {
+    if (state.demoOperations[step] === operationPromise) {
+      delete state.demoOperations[step];
+    }
+  });
+  return operationPromise;
+}
+
 function advanceDemo() {
+  const completedStep = state.demo.step;
   state.demo = CemeteryCore.nextDemoState(state.demo, "complete");
+  delete state.demoOperations[completedStep];
   renderDemoProgress();
 }
 
@@ -1690,6 +1764,7 @@ function renderDemoProgress() {
   }
   retryButton.hidden = state.demo.status !== "failed";
   runButton.disabled = state.running;
+  renderInteractionLocks();
 }
 
 async function runDemoFlow() {
@@ -1698,7 +1773,11 @@ async function runDemoFlow() {
   state.demo = retrying
     ? CemeteryCore.nextDemoState(state.demo, "retry")
     : { step: 0, status: "running" };
-  if (!retrying) state.demoResults = {};
+  if (!retrying) {
+    invalidateArchive("xiami");
+    state.demoResults = {};
+    state.demoOperations = {};
+  }
   delete state.demo.error;
   state.running = true;
   renderDemoProgress();
@@ -1706,32 +1785,40 @@ async function runDemoFlow() {
   try {
     const item = cases.find((entry) => entry.id === "xiami");
     if (state.demo.step === 0) {
-      selectCase("xiami");
+      selectCase("xiami", true, true);
       state.demoResults.item = item;
       advanceDemo();
     }
     if (state.demo.step === 1) {
-      state.demoResults.evidencePackage = await withTimeout(loadEvidencePackage("xiami"), 5000);
+      state.demoResults.evidencePackage = await withTimeout(
+        runDemoOperation(1, () => loadEvidencePackage("xiami")),
+        5000,
+      );
       advanceDemo();
     }
     if (state.demo.step === 2) {
-      state.demoResults.liveArchive = await withTimeout(lookupWayback("https://www.xiami.com"), 8000);
+      state.demoResults.liveArchive = await withTimeout(
+        runDemoOperation(2, () => lookupWayback("https://www.xiami.com")),
+        8000,
+      );
       advanceDemo();
     }
     if (state.demo.step === 3) {
       state.demoResults.verification = await withTimeout(
-        verifyWithGonka(item, state.demoResults.liveArchive, state.demoResults.evidencePackage),
+        runDemoOperation(3, () =>
+          verifyWithGonka(item, state.demoResults.liveArchive, state.demoResults.evidencePackage),
+        ),
         45000,
       );
       advanceDemo();
     }
     if (state.demo.step === 4) {
       renderMemorial(item, state.demoResults.liveArchive, state.demoResults.verification);
-      await sealCurrentArchive();
+      await withTimeout(runDemoOperation(4, () => sealCurrentArchive(true)), 15000);
       advanceDemo();
     }
     if (state.demo.step === 5) {
-      generateMemorialCredential();
+      generateMemorialCredential(true);
       if (!state.credentials.xiami) throw new Error("纪念凭证生成失败");
       advanceDemo();
     }
@@ -1789,26 +1876,42 @@ async function lookupWayback(url) {
 
 async function loadEvidencePackage(caseId) {
   if (evidencePackages.has(caseId)) return evidencePackages.get(caseId);
+  if (evidencePackagePromises.has(caseId)) return evidencePackagePromises.get(caseId);
   if (caseId !== "xiami") return null;
-  const response = await fetch("./data/xiami-evidence.json");
-  if (!response.ok) throw new Error(`Evidence HTTP ${response.status}`);
-  const payload = await response.json();
-  evidencePackages.set(caseId, payload);
-  return payload;
+
+  const evidencePromise = (async () => {
+    const response = await fetch("./data/xiami-evidence.json");
+    if (!response.ok) throw new Error(`Evidence HTTP ${response.status}`);
+    const payload = await response.json();
+    evidencePackages.set(caseId, payload);
+    return payload;
+  })();
+
+  evidencePackagePromises.set(caseId, evidencePromise);
+  try {
+    return await evidencePromise;
+  } finally {
+    if (evidencePackagePromises.get(caseId) === evidencePromise) {
+      evidencePackagePromises.delete(caseId);
+    }
+  }
 }
 
 async function verifyWithGonka(item, liveArchive, evidencePackage) {
   try {
+    const requestPayload = evidencePackage === undefined
+      ? {
+          case: item,
+          archive: liveArchive,
+          evidencePackage: await loadEvidencePackage(item.id),
+        }
+      : { case: item, archive: liveArchive, evidencePackage };
     const response = await fetch("/api/gonka/verify", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        case: item,
-        archive: liveArchive,
-        evidencePackage: await loadEvidencePackage(item.id),
-      }),
+      body: JSON.stringify(requestPayload),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -1825,6 +1928,7 @@ async function runAnalysis(event) {
   if (state.running) return;
 
   state.running = true;
+  renderInteractionLocks();
   const item = cases.find((entry) => entry.id === byId("caseSelect").value) || cases[0];
   const inputUrl = byId("urlInput").value;
   invalidateArchive(item.id);
@@ -1848,6 +1952,7 @@ async function runAnalysis(event) {
   renderMemorial(item, liveArchive, verification);
   setAgentState(CemeteryCore.verificationCompletionCopy(verification));
   state.running = false;
+  renderInteractionLocks();
   byId("memorial").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 

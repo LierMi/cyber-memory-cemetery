@@ -8,7 +8,7 @@ export default defineConfig({
   webServer: {
     command: "python3 server.py",
     url: "http://127.0.0.1:5177/api/status",
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 120000,
   },
   projects: [

@@ -451,7 +451,7 @@ a:focus-visible {
   color: var(--danger);
 }
 
-@media (max-width: 700px) {
+@media (max-width: 719px) {
   .demo-flow-head {
     align-items: stretch;
     flex-direction: column;

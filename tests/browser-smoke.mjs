@@ -1,5 +1,39 @@
 import { test, expect } from "@playwright/test";
 
+const waybackRows = [
+  ["timestamp", "statuscode"],
+  ["20080101000000", "200"],
+  ["20210101000000", "200"],
+];
+
+function verificationResult(requestIds, truthScore = 88) {
+  return {
+    verificationState: "cached_live",
+    truthScore,
+    consensusConfidence: 90,
+    requests: requestIds.map((requestId, index) => ({
+      role: index === 0 ? "digital_archaeologist" : "truth_verifier",
+      model: index === 0 ? "review-archaeologist" : "review-verifier",
+      requestId,
+      truthScore,
+      summary: "Route-backed browser verification result.",
+    })),
+  };
+}
+
+async function enterCemetery(page) {
+  await page.goto("http://127.0.0.1:5177/");
+  await page.getByRole("button", { name: "进入公墓" }).click();
+}
+
+async function expectDemoComplete(page) {
+  await expect
+    .poll(() =>
+      page.locator("[data-demo-step]").evaluateAll((rows) => rows.map((row) => row.dataset.status)),
+    )
+    .toEqual(Array(6).fill("done"));
+}
+
 test.beforeEach(async ({ request }) => {
   const response = await request.get("http://127.0.0.1:5177/api/status");
   expect(response.ok()).toBeTruthy();
@@ -34,12 +68,13 @@ test("Xiami presentation reaches a sealed credential", async ({ page }, testInfo
       })
       .map((element) => `${element.tagName.toLowerCase()}.${element.className}`)
       .slice(0, 10);
-    const requestIdsWrap = [...document.querySelectorAll(".request-list code")].every(
+    const requestIds = [...document.querySelectorAll(".request-id")];
+    const requestIdsWrap = requestIds.every(
       (element) => element.scrollWidth <= element.clientWidth + 1,
     );
     const progressColumns = getComputedStyle(document.querySelector("#demoProgress"))
       .gridTemplateColumns.split(" ").length;
-    return { overflowing, requestIdsWrap, progressColumns };
+    return { overflowing, requestIdCount: requestIds.length, requestIdsWrap, progressColumns };
   });
   const pageGeometry = await page.evaluate(() => {
     const absoluteBox = (element) => {
@@ -82,6 +117,7 @@ test("Xiami presentation reaches a sealed credential", async ({ page }, testInfo
     };
   });
   expect(layout.overflowing).toEqual([]);
+  expect(layout.requestIdCount).toBeGreaterThan(0);
   expect(layout.requestIdsWrap).toBeTruthy();
   expect(layout.progressColumns).toBe(testInfo.project.name === "mobile-chromium" ? 1 : 3);
   expect(pageGeometry.documentScrollHeight).toBe(pageGeometry.bodyScrollHeight);
@@ -110,62 +146,183 @@ test("Xiami presentation reaches a sealed credential", async ({ page }, testInfo
   await page.screenshot({ path: testInfo.outputPath("task-7-viewport.png"), scale: "css" });
 });
 
-test("retry resumes at the failed seal step", async ({ page }) => {
+test("route-backed evidence failure retries without repeating completed operations", async ({ page }) => {
+  const longRequestId = `review-request-${"x".repeat(240)}`;
+  let evidenceShouldFail = true;
+  let evidenceRequests = 0;
   let waybackRequests = 0;
   let gonkaRequests = 0;
   let archiveRequests = 0;
 
+  await page.route("**/data/xiami-evidence.json", async (route) => {
+    evidenceRequests += 1;
+    if (evidenceShouldFail) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await route.fulfill({ status: 503, json: { error: "forced evidence failure" } });
+      return;
+    }
+    await route.continue();
+  });
   await page.route("https://web.archive.org/cdx**", async (route) => {
     waybackRequests += 1;
-    await route.fulfill({
-      json: [
-        ["timestamp", "statuscode"],
-        ["20080101000000", "200"],
-        ["20210101000000", "200"],
-      ],
-    });
+    await route.fulfill({ json: waybackRows });
   });
   await page.route("**/api/gonka/verify", async (route) => {
     gonkaRequests += 1;
-    await route.fulfill({
-      json: {
-        verificationState: "cached_live",
-        truthScore: 88,
-        consensusConfidence: 0.9,
-        requests: [
-          { role: "digital_archaeologist", requestId: "retry-gonka-a", score: 88 },
-          { role: "truth_verifier", requestId: "retry-gonka-b", score: 88 },
-        ],
-      },
-    });
+    await route.fulfill({ json: verificationResult([longRequestId, "retry-gonka-b"]) });
   });
   await page.route("**/api/archive/seal", async (route) => {
     archiveRequests += 1;
     await route.continue();
   });
 
-  await page.goto("http://127.0.0.1:5177/");
-  await page.getByRole("button", { name: "进入公墓" }).click();
-  await page.evaluate(() => {
-    const seal = window.sealCurrentArchive;
-    let attempts = 0;
-    window.sealCurrentArchive = async (...args) => {
-      attempts += 1;
-      if (attempts === 1) throw new Error("forced seal failure");
-      return seal(...args);
-    };
-  });
-
+  await enterCemetery(page);
   await page.getByRole("button", { name: "一键演示" }).click();
   await expect(page.getByRole("button", { name: "从失败步骤重试" })).toBeVisible();
-  await expect(page.locator('[data-demo-step="4"]')).toHaveAttribute("data-status", "failed");
-  expect(waybackRequests).toBe(1);
-  expect(gonkaRequests).toBe(1);
+  await expect(page.locator('[data-demo-step="1"]')).toHaveAttribute("data-status", "failed");
+  expect(evidenceRequests).toBe(1);
+  expect(waybackRequests).toBe(0);
+  expect(gonkaRequests).toBe(0);
   expect(archiveRequests).toBe(0);
 
+  evidenceShouldFail = false;
   await page.getByRole("button", { name: "从失败步骤重试" }).click();
-  await expect(page.getByRole("button", { name: "下载纪念凭证" })).toBeVisible();
+  await expectDemoComplete(page);
+  expect(evidenceRequests).toBe(2);
   expect(waybackRequests).toBe(1);
   expect(gonkaRequests).toBe(1);
   expect(archiveRequests).toBe(1);
+
+  const longId = page.locator(".request-id").filter({ hasText: longRequestId }).first();
+  await expect(longId).toBeVisible();
+  expect(
+    await longId.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBeTruthy();
+});
+
+test("a fresh second run seals only the second verification payload", async ({ page }) => {
+  const archivePayloads = [];
+  let verificationRun = 0;
+
+  await page.route("https://web.archive.org/cdx**", (route) => route.fulfill({ json: waybackRows }));
+  await page.route("**/api/gonka/verify", async (route) => {
+    verificationRun += 1;
+    const prefix = verificationRun === 1 ? "first-run" : "second-run";
+    await route.fulfill({
+      json: verificationResult([`${prefix}-archaeologist`, `${prefix}-verifier`], 80 + verificationRun),
+    });
+  });
+  await page.route("**/api/archive/seal", async (route) => {
+    archivePayloads.push(route.request().postDataJSON().payload);
+    await route.continue();
+  });
+
+  await enterCemetery(page);
+  const runButton = page.getByRole("button", { name: "一键演示" });
+  await runButton.click();
+  await expectDemoComplete(page);
+  await expect(runButton).toBeEnabled();
+  await runButton.click();
+  await expect.poll(() => archivePayloads.length).toBe(2);
+  await expectDemoComplete(page);
+
+  expect(archivePayloads[0].verification.requests.map((request) => request.requestId)).toEqual([
+    "first-run-archaeologist",
+    "first-run-verifier",
+  ]);
+  expect(archivePayloads[1].verification.requests.map((request) => request.requestId)).toEqual([
+    "second-run-archaeologist",
+    "second-run-verifier",
+  ]);
+  expect(archivePayloads[1].verification.truthScore).toBe(82);
+});
+
+test("running demo blocks manual case, seal, and credential mutation", async ({ page }) => {
+  let releaseGonka;
+  let markGonkaStarted;
+  const gonkaStarted = new Promise((resolve) => {
+    markGonkaStarted = resolve;
+  });
+  const gonkaGate = new Promise((resolve) => {
+    releaseGonka = resolve;
+  });
+  let archiveRequests = 0;
+
+  await page.route("https://web.archive.org/cdx**", (route) => route.fulfill({ json: waybackRows }));
+  await page.route("**/api/gonka/verify", async (route) => {
+    markGonkaStarted();
+    await gonkaGate;
+    await route.fulfill({ json: verificationResult(["guard-a", "guard-b"]) });
+  });
+  await page.route("**/api/archive/seal", async (route) => {
+    archiveRequests += 1;
+    await route.continue();
+  });
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+  await gonkaStarted;
+
+  await expect(page.locator("#caseSelect")).toBeDisabled();
+  expect(
+    await page.locator("[data-action='seal-archive']").evaluateAll((buttons) =>
+      buttons.every((button) => button.disabled),
+    ),
+  ).toBeTruthy();
+  expect(
+    await page.locator("[data-action='generate-credential']").evaluateAll((buttons) =>
+      buttons.every((button) => button.disabled),
+    ),
+  ).toBeTruthy();
+  await expect(page.locator("[data-case-id]").first()).toHaveAttribute("aria-disabled", "true");
+
+  await page.evaluate(async () => {
+    window.selectCase("renren");
+    await window.sealCurrentArchive();
+    window.generateMemorialCredential();
+  });
+  await expect(page.locator("#caseSelect")).toHaveValue("xiami");
+  expect(archiveRequests).toBe(0);
+  await expect(page.getByRole("button", { name: "下载纪念凭证" })).toHaveCount(0);
+
+  releaseGonka();
+  await expectDemoComplete(page);
+  expect(archiveRequests).toBe(1);
+});
+
+test("retry re-awaits a timed-out archive request without duplicating it", async ({ page }) => {
+  let gonkaRequests = 0;
+  let archiveRequests = 0;
+
+  await page.route("https://web.archive.org/cdx**", (route) => route.fulfill({ json: waybackRows }));
+  await page.route("**/api/gonka/verify", async (route) => {
+    gonkaRequests += 1;
+    await route.fulfill({ json: verificationResult(["late-a", "late-b"]) });
+  });
+  await page.route("**/api/archive/seal", async (route) => {
+    archiveRequests += 1;
+    await new Promise((resolve) => setTimeout(resolve, 17000));
+    await route.continue();
+  });
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+  await expect(page.getByRole("button", { name: "从失败步骤重试" })).toBeVisible();
+  await expect(page.locator('[data-demo-step="4"]')).toHaveAttribute("data-status", "failed");
+  expect(gonkaRequests).toBe(1);
+  expect(archiveRequests).toBe(1);
+
+  await page.getByRole("button", { name: "从失败步骤重试" }).click();
+  await expectDemoComplete(page);
+  expect(gonkaRequests).toBe(1);
+  expect(archiveRequests).toBe(1);
+});
+
+test("progress is one column at the 719px boundary", async ({ page }) => {
+  await page.setViewportSize({ width: 719, height: 900 });
+  await enterCemetery(page);
+  const columns = await page.locator("#demoProgress").evaluate(
+    (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
+  );
+  expect(columns).toBe(1);
 });
