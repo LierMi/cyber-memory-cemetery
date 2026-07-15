@@ -8,6 +8,9 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
+from cemetery_core import aggregate_consensus, cache_key, normalize_score
+from verification_cache import VerificationCache
+
 
 def load_dotenv(path=".env"):
     if not os.path.exists(path):
@@ -41,6 +44,7 @@ PINATA_PIN_JSON_URL = os.getenv(
 )
 PINATA_GATEWAY_URL = os.getenv("PINATA_GATEWAY_URL", "https://gateway.pinata.cloud/ipfs/")
 MODEL_CACHE = None
+VERIFICATION_CACHE = VerificationCache("tmp/cache")
 MAX_EVIDENCE_CLAIMS = 12
 MAX_EVIDENCE_CLAIM_LENGTH = 500
 MAX_EVIDENCE_SOURCE_TITLE_LENGTH = 200
@@ -273,25 +277,46 @@ def mock_verification(payload, reason=None):
         "source": "mock",
         "truthScore": truth_score,
         "epitaph": case.get("epitaph", ""),
+        "caseId": case_id,
+        "verifiedAt": utc_timestamp(),
+        "scoreSpread": None,
+        "consensusConfidence": 0,
+        "verificationState": "demo_fallback",
+        "sealEligibility": "draft",
+        "cacheStatus": "not_cached_demo_fallback",
         "requests": [
             {
                 "role": "digital_archaeologist",
                 "model": "mock-archaeologist",
                 "requestId": make_mock_request_id("archaeologist", case_id),
+                "requestedAt": utc_timestamp(),
+                "truthScore": truth_score,
                 "summary": (
                     f"{case.get('name', '该网站')} 的公开资料显示，它属于"
                     f"{case.get('type', 'Web2 社区')}。当前档案包含 {archive_count} 条快照或演示证据，"
                     f"证据来源为{source_note}。"
                 ),
+                "verifiedFacts": [],
+                "uncertainClaims": [],
+                "riskFlags": [],
+                "fallback": True,
+                "details": {"fallback": True},
             },
             {
                 "role": "truth_verifier",
                 "model": "mock-verifier",
                 "requestId": make_mock_request_id("verifier", case_id),
+                "requestedAt": utc_timestamp(),
+                "truthScore": truth_score,
                 "summary": (
                     "可验证事实包括平台名称、公开访问入口、社区类型和主要文化标签。"
                     "涉及用户个人内容的部分不直接保存，仅作为文化形态描述。"
                 ),
+                "verifiedFacts": [],
+                "uncertainClaims": [],
+                "riskFlags": [],
+                "fallback": True,
+                "details": {"fallback": True},
             },
         ],
         "notes": notes,
@@ -357,6 +382,10 @@ def model_summary(parsed, content):
     if cleaned and not cleaned.startswith("<think>"):
         return cleaned[:180]
     return "模型已返回真实 Gonka Request ID，正文被 reasoning 或 token 限制截断。"
+
+
+def utc_timestamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def evidence_line(item):
@@ -586,7 +615,13 @@ def fallback_request(role, model, case, reason):
         "role": role,
         "model": model,
         "requestId": make_mock_request_id(role, case.get("id", "case")),
+        "requestedAt": utc_timestamp(),
         "summary": reason,
+        "truthScore": None,
+        "verifiedFacts": [],
+        "uncertainClaims": [],
+        "riskFlags": [],
+        "fallback": True,
         "details": {"fallback": True, "reason": reason},
     }
 
@@ -608,29 +643,51 @@ def run_council_member(role, model, payload, temperature):
         "role": role,
         "model": model,
         "requestId": completion["requestId"],
+        "requestedAt": utc_timestamp(),
         "summary": model_summary(parsed, completion["content"]),
         "details": parsed,
     }
 
 
-def aggregate_truth_score(requests, fallback_score):
-    scores = []
-    for request in requests:
-        details = request.get("details") or {}
-        if details.get("fallback"):
-            continue
-        score = details.get("truthScore") or details.get("suggestedTruthScore")
-        if score is not None:
-            scores.append(normalize_model_score(score, fallback_score))
-    if not scores:
-        return fallback_score
-    return round(sum(scores) / len(scores))
+def normalized_string_list(value):
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
 
 
-def run_gonka_verification(payload):
-    if not GONKA_API_KEY:
-        return mock_verification(payload)
+def normalize_council_request(request, fallback_score):
+    details = request.get("details") if isinstance(request.get("details"), dict) else {}
+    fallback = bool(request.get("fallback") or details.get("fallback"))
+    raw_score = request.get("truthScore")
+    if raw_score is None:
+        raw_score = details.get("truthScore", details.get("suggestedTruthScore"))
+    return {
+        "role": request.get("role"),
+        "model": request.get("model"),
+        "requestId": request.get("requestId"),
+        "requestedAt": request.get("requestedAt") or utc_timestamp(),
+        "truthScore": normalize_score(raw_score, fallback_score),
+        "summary": request.get("summary", ""),
+        "verifiedFacts": normalized_string_list(
+            request.get("verifiedFacts", details.get("verifiedFacts", details.get("supportedFacts")))
+        ),
+        "uncertainClaims": normalized_string_list(
+            request.get("uncertainClaims", details.get("uncertainClaims"))
+        ),
+        "riskFlags": normalized_string_list(request.get("riskFlags", details.get("riskFlags"))),
+        "fallback": fallback,
+        "details": details,
+    }
 
+
+def evidence_completeness(payload):
+    claims = normalize_evidence_package(payload.get("evidencePackage") or {}).get("claims", [])
+    return round(len(claims) * 100 / MAX_EVIDENCE_CLAIMS)
+
+
+def run_live_council(payload):
     case = payload.get("case", {})
     fallback_score = clamp_score(case.get("truthScore"), 86)
 
@@ -658,10 +715,12 @@ def run_gonka_verification(payload):
 
     role_order = {"digital_archaeologist": 0, "truth_verifier": 1}
     requests.sort(key=lambda request: role_order.get(request.get("role"), 99))
-    truth_score = aggregate_truth_score(requests, fallback_score)
+    requests = [normalize_council_request(request, fallback_score) for request in requests]
     all_fallback = bool(requests) and all(
-        (request.get("details") or {}).get("fallback") for request in requests
+        request.get("fallback") for request in requests
     )
+    if all_fallback:
+        raise RuntimeError("All live Gonka council requests failed.")
     notes.append("模型池：" + ", ".join(model_pool))
     for request in requests:
         details = request.get("details") or {}
@@ -669,13 +728,47 @@ def run_gonka_verification(payload):
             if flag not in notes:
                 notes.append(flag)
 
-    return {
-        "source": "mock" if all_fallback else "gonka",
-        "truthScore": truth_score,
+    consensus = aggregate_consensus(requests, evidence_completeness(payload))
+    result = {
+        "source": "gonka",
+        "caseId": case.get("id"),
         "epitaph": case.get("epitaph", ""),
         "requests": requests,
         "notes": notes,
+        "verifiedAt": utc_timestamp(),
+        **consensus,
     }
+    if consensus["verificationState"] == "partial":
+        result["cacheStatus"] = "not_cached_partial"
+    else:
+        result["cacheStatus"] = "pending_live_cache"
+    return result
+
+
+def run_gonka_verification(payload):
+    if not GONKA_API_KEY:
+        return mock_verification(payload)
+
+    try:
+        result = run_live_council(payload)
+    except Exception:
+        cached = VERIFICATION_CACHE.latest_for_case((payload.get("case") or {}).get("id"))
+        if cached:
+            restored = dict(cached)
+            restored["verificationState"] = "cached_live"
+            restored["sealEligibility"] = "verified"
+            restored["cacheStatus"] = "restored_after_live_failure"
+            return restored
+        return mock_verification(payload, reason="Gonka unavailable and no live cache exists.")
+
+    if result["verificationState"] == "live_consensus":
+        evidence_version = (payload.get("evidencePackage") or {}).get("version", "unversioned")
+        result["cacheKey"] = cache_key(
+            result.get("caseId"), evidence_version, [request.get("model") for request in result["requests"]]
+        )
+        result["cacheStatus"] = "written_live_consensus"
+        VERIFICATION_CACHE.write(result["cacheKey"], result)
+    return result
 
 
 class Handler(SimpleHTTPRequestHandler):

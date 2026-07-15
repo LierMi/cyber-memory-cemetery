@@ -1,10 +1,135 @@
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import server
 from server import build_council_prompt, format_evidence_package, normalize_evidence_package
+from verification_cache import VerificationCache
+
+
+class VerificationCacheTests(unittest.TestCase):
+    def test_round_trip_preserves_request_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = VerificationCache(Path(directory))
+            value = {
+                "verificationState": "live_consensus",
+                "requests": [{"requestId": "gonka-1"}],
+            }
+            cache.write("abc", value)
+            self.assertEqual(cache.read("abc")["requests"][0]["requestId"], "gonka-1")
+
+    def test_two_failed_models_use_real_cache(self):
+        cached = {
+            "source": "gonka",
+            "verificationState": "live_consensus",
+            "verifiedAt": "2026-07-15T12:00:00Z",
+            "requests": [
+                {"model": "archaeologist", "requestId": "gonka-a"},
+                {"model": "verifier", "requestId": "gonka-b"},
+            ],
+        }
+        with patch.object(server, "GONKA_API_KEY", "test-key"):
+            with patch.object(server, "run_live_council", side_effect=RuntimeError("offline")):
+                with patch.object(server.VERIFICATION_CACHE, "latest_for_case", return_value=cached):
+                    result = server.run_gonka_verification({"case": {"id": "xiami"}})
+        self.assertEqual(result["verificationState"], "cached_live")
+        self.assertEqual(result["requests"][0]["requestId"], "gonka-a")
+        self.assertEqual(result["requests"][1]["model"], "verifier")
+        self.assertEqual(result["verifiedAt"], "2026-07-15T12:00:00Z")
+        self.assertEqual(result["cacheStatus"], "restored_after_live_failure")
+
+    def test_two_member_failures_restore_latest_live_cache(self):
+        cached = {
+            "source": "gonka",
+            "verificationState": "live_consensus",
+            "verifiedAt": "2026-07-15T12:00:00Z",
+            "requests": [{"requestId": "gonka-a"}, {"requestId": "gonka-b"}],
+        }
+        with patch.object(server, "GONKA_API_KEY", "test-key"), patch.object(
+            server, "resolve_council_models", return_value=("archaeologist", "verifier", [])
+        ), patch.object(server, "run_council_member", side_effect=RuntimeError("offline")), patch.object(
+            server.VERIFICATION_CACHE, "latest_for_case", return_value=cached
+        ):
+            result = server.run_gonka_verification({"case": {"id": "xiami"}})
+
+        self.assertEqual(result["verificationState"], "cached_live")
+        self.assertEqual(result["requests"][1]["requestId"], "gonka-b")
+
+
+class GonkaCouncilStateTests(unittest.TestCase):
+    def test_two_real_models_normalize_to_live_consensus_and_write_cache(self):
+        payload = {
+            "case": {"id": "xiami", "epitaph": "test"},
+            "evidencePackage": {"version": "2026-07-15.1", "claims": []},
+        }
+        responses = [
+            {
+                "role": "digital_archaeologist",
+                "model": "archaeologist",
+                "requestId": "gonka-a",
+                "summary": "archaeologist result",
+                "details": {"truthScore": 9.0, "verifiedFacts": "fact", "riskFlags": None},
+            },
+            {
+                "role": "truth_verifier",
+                "model": "verifier",
+                "requestId": "gonka-b",
+                "summary": "verifier result",
+                "details": {"truthScore": 84, "uncertainClaims": ["uncertain"]},
+            },
+        ]
+        with patch.object(server, "GONKA_API_KEY", "test-key"), patch.object(
+            server, "resolve_council_models", return_value=("archaeologist", "verifier", [])
+        ), patch.object(server, "run_council_member", side_effect=responses), patch.object(
+            server.VERIFICATION_CACHE, "write"
+        ) as write:
+            result = server.run_gonka_verification(payload)
+
+        self.assertEqual(result["source"], "gonka")
+        self.assertEqual(result["verificationState"], "live_consensus")
+        self.assertEqual(result["truthScore"], 87)
+        self.assertEqual(result["scoreSpread"], 6)
+        self.assertEqual(result["sealEligibility"], "verified")
+        self.assertEqual(result["cacheStatus"], "written_live_consensus")
+        self.assertTrue(result["cacheKey"])
+        self.assertTrue(result["verifiedAt"].endswith("Z"))
+        for request in result["requests"]:
+            self.assertTrue(request["requestedAt"].endswith("Z"))
+            self.assertIsInstance(request["truthScore"], int)
+            self.assertIsInstance(request["verifiedFacts"], list)
+            self.assertIsInstance(request["uncertainClaims"], list)
+            self.assertIsInstance(request["riskFlags"], list)
+            self.assertFalse(request["fallback"])
+        write.assert_called_once_with(result["cacheKey"], result)
+
+    def test_one_real_model_remains_partial_and_is_not_cached(self):
+        payload = {"case": {"id": "xiami", "truthScore": 86}}
+        responses = [
+            {
+                "role": "digital_archaeologist",
+                "model": "archaeologist",
+                "requestId": "gonka-a",
+                "summary": "archaeologist result",
+                "details": {"truthScore": 88},
+            },
+            server.fallback_request(
+                "truth_verifier", "verifier", payload["case"], "forced failure"
+            ),
+        ]
+        with patch.object(server, "GONKA_API_KEY", "test-key"), patch.object(
+            server, "resolve_council_models", return_value=("archaeologist", "verifier", [])
+        ), patch.object(server, "run_council_member", side_effect=responses), patch.object(
+            server.VERIFICATION_CACHE, "write"
+        ) as write:
+            result = server.run_gonka_verification(payload)
+
+        self.assertEqual(result["verificationState"], "partial")
+        self.assertEqual(result["sealEligibility"], "draft")
+        self.assertEqual(result["cacheStatus"], "not_cached_partial")
+        self.assertIsInstance(result["requests"][1]["truthScore"], int)
+        write.assert_not_called()
 
 
 class XiamiEvidenceTests(unittest.TestCase):
@@ -144,7 +269,9 @@ class XiamiEvidenceTests(unittest.TestCase):
 
         with patch.object(server, "GONKA_API_KEY", "test-key"), patch.object(
             server, "resolve_council_models", return_value=("archaeologist", "verifier", [])
-        ), patch.object(server, "run_council_member", side_effect=RuntimeError("forced failure")):
+        ), patch.object(server, "run_council_member", side_effect=RuntimeError("forced failure")), patch.object(
+            server.VERIFICATION_CACHE, "latest_for_case", return_value=None
+        ):
             result = server.run_gonka_verification(payload)
 
         self.assertEqual(result["source"], "mock")

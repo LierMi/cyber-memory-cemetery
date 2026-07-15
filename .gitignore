@@ -4,6 +4,7 @@ __pycache__/
 .DS_Store
 .worktrees/
 tmp/
+tmp/cache/
 node_modules/
 test-results/
 playwright-report/
