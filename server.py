@@ -384,7 +384,15 @@ def bullet_lines(items):
     return "\n".join([f"- {item}" for item in items])
 
 
-def format_case_for_prompt(case, archive):
+def format_evidence_package(evidence_package):
+    claims = (evidence_package or {}).get("claims") or []
+    return "\n".join(
+        f"- [{item.get('confidence')}] {item.get('claim')} 来源:{item.get('sourceUrl')}"
+        for item in claims
+    ) or "- 无独立策展证据包"
+
+
+def format_case_for_prompt(case, archive, evidence_package=None):
     evidence_text = "\n".join(
         [line for line in [evidence_line(item) for item in case.get("evidence", [])] if line]
     )
@@ -419,6 +427,9 @@ def format_case_for_prompt(case, archive):
 隐私边界：
 {case.get("privacyBoundary") or "只处理公开元数据和用户主动提交材料。"}
 
+独立策展证据包：
+{format_evidence_package(evidence_package)}
+
 Demo 讲法：
 {case.get("demoAngle") or "展示证据到墓志铭的完整链路。"}
 """.strip()
@@ -446,6 +457,7 @@ def chat_completion(model, messages, temperature=0.25):
 def build_archaeologist_prompt(payload):
     case = payload.get("case", {})
     archive = payload.get("archive") or {}
+    evidence_package = payload.get("evidencePackage") or {}
 
     return f"""
 你是赛博记忆公墓的数字考古员。你的任务是根据证据总结一个消失或衰退的 Web2 社区。
@@ -456,7 +468,7 @@ def build_archaeologist_prompt(payload):
 3. 必须直接输出 JSON，不要输出 Markdown，不要解释，不要输出 <think>。
 
 案例：
-{format_case_for_prompt(case, archive)}
+{format_case_for_prompt(case, archive, evidence_package)}
 
 字段要求：summary, verifiedFacts, uncertainClaims, culturalTags, suggestedTruthScore。
 """.strip()
@@ -465,6 +477,7 @@ def build_archaeologist_prompt(payload):
 def build_verifier_prompt(payload, archaeologist_json):
     case = payload.get("case", {})
     archive = payload.get("archive") or {}
+    evidence_package = payload.get("evidencePackage") or {}
 
     return f"""
 你是赛博记忆公墓的真相校验员。请审查数字考古员的结论是否被证据支撑。
@@ -487,6 +500,9 @@ def build_verifier_prompt(payload, archaeologist_json):
 实时档案：
 {json.dumps(archive, ensure_ascii=False)}
 
+独立策展证据包：
+{format_evidence_package(evidence_package)}
+
 数字考古员结论：
 {json.dumps(archaeologist_json, ensure_ascii=False)}
 
@@ -497,10 +513,11 @@ def build_verifier_prompt(payload, archaeologist_json):
 def build_council_prompt(payload, role_name):
     case = payload.get("case", {})
     archive = payload.get("archive") or {}
+    evidence_package = payload.get("evidencePackage") or {}
 
     return f"""
 你是{role_name}。只根据证据评估 Web2 数字遗产。
-{format_case_for_prompt(case, archive)}
+{format_case_for_prompt(case, archive, evidence_package)}
 只输出极短 JSON: {{"summary":"40字内","truthScore":0,"verifiedFacts":["1条"],"uncertainClaims":["1条"],"riskFlags":["1条"]}}
 truthScore 必须是 0 到 100 的整数，不要使用 0 到 10。
 """.strip()

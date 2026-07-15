@@ -1,0 +1,130 @@
+{
+  "schema": "cyber-memory-cemetery/evidence/v1",
+  "caseId": "xiami",
+  "version": "2026-07-15.1",
+  "curatedAt": "2026-07-15T12:00:00Z",
+  "evidenceCompleteness": 92,
+  "privacyBoundary": "Only public metadata and short factual summaries are archived.",
+  "claims": [
+    {
+      "id": "xiami-emumo-predecessor-2006",
+      "claim": "虾米的前身 Emumo 创建于 2006 年；这不是虾米音乐的上线年份。",
+      "type": "timeline",
+      "sourceTitle": "新华网转载中国新闻网：虾米音乐将于2月5日停止服务",
+      "sourceUrl": "https://www.xinhuanet.com/fortune/2021-01/05/c_1126948999.htm",
+      "sourceDate": "2021-01-05",
+      "confidence": "secondary",
+      "supports": ["timeline", "origin"],
+      "publicArchiveAllowed": true,
+      "rightsNote": "Archive the factual summary and URL only."
+    },
+    {
+      "id": "xiami-music-launch-2008",
+      "claim": "虾米音乐于 2008 年上线。",
+      "type": "timeline",
+      "sourceTitle": "每日经济新闻：虾米音乐将停止服务",
+      "sourceUrl": "https://www.nbd.com.cn/articles/2021-01-05/1588797.html",
+      "sourceDate": "2021-01-05",
+      "confidence": "secondary",
+      "supports": ["lifespan", "timeline"],
+      "publicArchiveAllowed": true,
+      "rightsNote": "Archive the factual summary and URL only."
+    },
+    {
+      "id": "xiami-alibaba-acquisition-2013",
+      "claim": "阿里巴巴音乐业务于 2013 年 1 月收购虾米。",
+      "type": "ownership",
+      "sourceTitle": "人民网：阿里音乐集团发布会报道",
+      "sourceUrl": "https://media.people.com.cn/n/2015/0715/c14677-27310488.html",
+      "sourceDate": "2015-07-15",
+      "confidence": "secondary",
+      "supports": ["timeline", "ownership"],
+      "publicArchiveAllowed": true,
+      "rightsNote": "Archive the factual summary and URL only."
+    },
+    {
+      "id": "xiami-alimusic-merger-2015",
+      "claim": "虾米与天天动听于 2015 年 3 月合并为阿里音乐。",
+      "type": "ownership",
+      "sourceTitle": "每日经济新闻：虾米音乐将停止服务",
+      "sourceUrl": "https://www.nbd.com.cn/articles/2021-01-05/1588797.html",
+      "sourceDate": "2021-01-05",
+      "confidence": "secondary",
+      "supports": ["timeline", "ownership"],
+      "publicArchiveAllowed": true,
+      "rightsNote": "Archive the factual summary and URL only."
+    },
+    {
+      "id": "xiami-shutdown-announcement-2021-01-05",
+      "claim": "虾米于 2021 年 1 月 5 日公告服务调整与分阶段停止计划。",
+      "type": "shutdown",
+      "sourceTitle": "新华网转载中国新闻网：虾米音乐将于2月5日停止服务",
+      "sourceUrl": "https://www.xinhuanet.com/fortune/2021-01/05/c_1126948999.htm",
+      "sourceDate": "2021-01-05",
+      "confidence": "primary",
+      "supports": ["shutdown", "timeline"],
+      "publicArchiveAllowed": true,
+      "rightsNote": "Archive the factual summary and URL only."
+    },
+    {
+      "id": "xiami-music-consumption-ended-2021-02-05",
+      "claim": "歌曲试听、下载和评论等音乐消费场景于 2021 年 2 月 5 日停止。",
+      "type": "shutdown",
+      "sourceTitle": "新华网转载中国新闻网：虾米音乐将于2月5日停止服务",
+      "sourceUrl": "https://www.xinhuanet.com/fortune/2021-01/05/c_1126948999.htm",
+      "sourceDate": "2021-01-05",
+      "confidence": "primary",
+      "supports": ["shutdown", "timeline"],
+      "publicArchiveAllowed": true,
+      "rightsNote": "Archive the factual summary and URL only."
+    },
+    {
+      "id": "xiami-servers-closed-2021-03-05",
+      "claim": "除有限的音螺音乐人授权服务外，其余运营于 2021 年 3 月 5 日停止，服务器关闭。",
+      "type": "shutdown",
+      "sourceTitle": "新华网转载中国新闻网：虾米音乐将于2月5日停止服务",
+      "sourceUrl": "https://www.xinhuanet.com/fortune/2021-01/05/c_1126948999.htm",
+      "sourceDate": "2021-01-05",
+      "confidence": "primary",
+      "supports": ["shutdown", "timeline"],
+      "publicArchiveAllowed": true,
+      "rightsNote": "Archive the factual summary and URL only."
+    },
+    {
+      "id": "xiami-playlist-export",
+      "claim": "关停前，用户可通过静态页面或 Excel 导出歌单信息。",
+      "type": "preservation",
+      "sourceTitle": "经济观察网：虾米音乐将于2月5日停止服务",
+      "sourceUrl": "https://www.eeo.com.cn/2021/0105/453369.shtml",
+      "sourceDate": "2021-01-05",
+      "confidence": "primary",
+      "supports": ["preservation", "user-data"],
+      "publicArchiveAllowed": true,
+      "rightsNote": "Archive the factual summary and URL only."
+    },
+    {
+      "id": "xiami-cultural-curation",
+      "claim": "细分音乐分类、乐评与社区策展被公开报道视为虾米具有辨识度的文化特征。",
+      "type": "cultural-context",
+      "sourceTitle": "每日经济新闻：虾米音乐将停止服务",
+      "sourceUrl": "https://www.nbd.com.cn/articles/2021-01-05/1588797.html",
+      "sourceDate": "2021-01-05",
+      "confidence": "context",
+      "supports": ["cultural-context"],
+      "publicArchiveAllowed": true,
+      "rightsNote": "Archive the factual summary and URL only."
+    },
+    {
+      "id": "xiami-wayback-snapshots",
+      "claim": "Wayback CDX 元数据显示 xiami.com 存在历史成功响应快照，可补充策展证据。",
+      "type": "archive-metadata",
+      "sourceTitle": "Internet Archive Wayback CDX metadata for xiami.com",
+      "sourceUrl": "https://web.archive.org/cdx?url=xiami.com&output=json&fl=timestamp,statuscode&filter=statuscode:200&collapse=digest&limit=80",
+      "sourceDate": "historical",
+      "confidence": "primary",
+      "supports": ["archive-metadata"],
+      "publicArchiveAllowed": true,
+      "rightsNote": "Archive timestamps and response status only."
+    }
+  ]
+}

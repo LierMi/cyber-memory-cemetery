@@ -57,6 +57,8 @@ const burialPlans = [
   },
 ];
 
+const evidencePackages = new Map();
+
 const cases = [
   {
     id: "renren",
@@ -184,9 +186,9 @@ const cases = [
     originalUrl: "https://www.xiami.com",
     type: "独立音乐社区",
     status: "已关停",
-    lifespan: "2007-2021",
+    lifespan: "2008-2021",
     archiveCount: 80,
-    firstSeen: "2007",
+    firstSeen: "2008",
     lastSeen: "2021",
     truthScore: 93,
     certainty: "高",
@@ -199,8 +201,8 @@ const cases = [
     evidence: [
       {
         title: "公开历史",
-        desc: "虾米网 2007 年创立，2008 年虾米音乐上线，早期以音乐推荐、发布、下载和互动内容为核心。",
-        url: "https://zh.wikipedia.org/wiki/%E8%99%BE%E7%B1%B3%E9%9F%B3%E4%B9%90",
+        desc: "虾米前身 Emumo 创建于 2006 年，虾米音乐于 2008 年上线；两者不是同一日期。",
+        url: "https://www.xinhuanet.com/fortune/2021-01/05/c_1126948999.htm",
       },
       {
         title: "平台归属",
@@ -215,10 +217,10 @@ const cases = [
     ],
     timeline: [
       {
-        date: "2007",
-        title: "虾米网创立",
-        detail: "由阿里前员工王皓等人创立，原名 EMUMO，含义为 Earn Music & Money。",
-        source: "https://zh.wikipedia.org/wiki/%E8%99%BE%E7%B1%B3%E9%9F%B3%E4%B9%90",
+        date: "2006",
+        title: "Emumo 前身创建",
+        detail: "Emumo 是虾米的前身；它的创建年份不应与虾米音乐的上线年份混为一谈。",
+        source: "https://www.xinhuanet.com/fortune/2021-01/05/c_1126948999.htm",
       },
       {
         date: "2008",
@@ -252,7 +254,7 @@ const cases = [
       },
     ],
     verifiableFacts: [
-      "虾米网于 2007 年创立，虾米音乐于 2008 年上线。",
+      "虾米前身 Emumo 创建于 2006 年，虾米音乐于 2008 年上线。",
       "虾米音乐在 2013 年被阿里巴巴集团全资收购。",
       "2015 年虾米音乐与天天动听合并为阿里音乐。",
       "2021 年 2 月 5 日起，虾米音乐停止歌曲试听、下载、评论等主要音乐消费场景。",
@@ -307,7 +309,7 @@ const cases = [
         role: "truth_verifier",
         model: "moonshotai/Kimi-K2.6",
         requestId: "devshard-23542-679",
-        summary: "虾米音乐 2007 年创立，2021 年关停，是中文独立音乐重要平台。",
+        summary: "虾米音乐于 2008 年上线，2021 年分阶段关停，是中文独立音乐重要平台。",
       },
     ],
   },
@@ -1972,6 +1974,16 @@ async function lookupWayback(url) {
   }
 }
 
+async function loadEvidencePackage(caseId) {
+  if (evidencePackages.has(caseId)) return evidencePackages.get(caseId);
+  if (caseId !== "xiami") return null;
+  const response = await fetch("./data/xiami-evidence.json");
+  if (!response.ok) throw new Error(`Evidence HTTP ${response.status}`);
+  const payload = await response.json();
+  evidencePackages.set(caseId, payload);
+  return payload;
+}
+
 async function verifyWithGonka(item, liveArchive) {
   try {
     const response = await fetch("/api/gonka/verify", {
@@ -1982,6 +1994,7 @@ async function verifyWithGonka(item, liveArchive) {
       body: JSON.stringify({
         case: item,
         archive: liveArchive,
+        evidencePackage: await loadEvidencePackage(item.id),
       }),
     });
     const data = await response.json();
