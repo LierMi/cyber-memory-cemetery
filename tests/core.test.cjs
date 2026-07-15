@@ -47,6 +47,31 @@ test("credential IDs distinguish full SHA-256 hashes with the same prefix", () =
   assert.notEqual(first.id, second.id);
 });
 
+test("readiness does not require Kite or a wallet", () => {
+  const items = core.archiveReadiness({
+    evidenceCount: 6,
+    requestCount: 2,
+    archiveSeal: { contentHash: "sha256:abc" },
+    credential: { id: "witness-sha256abc" },
+  });
+  assert.deepEqual(items.map((item) => item.label), ["公开证据", "模型会诊", "永久封存", "纪念凭证"]);
+  assert.equal(items.every((item) => item.ready), true);
+});
+
+test("NFT-ready metadata describes a future claim, not a mint", () => {
+  const credential = {
+    id: "witness-sha256abc",
+    name: "Cyber Memory Witness - 虾米音乐",
+    contentHash: "sha256:abc",
+    archiveId: "ipfs://cid",
+    truthScore: 89,
+    verificationState: "live_consensus",
+  };
+  const metadata = core.createNftReadyMetadata(credential, { image: "./assets/case-xiami.png" });
+  assert.equal(metadata.attributes.find((item) => item.trait_type === "Claim Status").value, "Pending on-chain claim");
+  assert.equal(metadata.attributes.find((item) => item.trait_type === "Archive Hash").value, "sha256:abc");
+});
+
 test("demo state stops on failure and resumes on retry", () => {
   const failed = core.nextDemoState({ step: 2, status: "running" }, "failure");
   assert.deepEqual(failed, { step: 2, status: "failed" });

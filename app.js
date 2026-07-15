@@ -36,27 +36,6 @@ const defaultRelics = [
   },
 ];
 
-const burialPlans = [
-  {
-    id: "witness",
-    name: "见证席",
-    price: "0 USDC",
-    desc: "签名留言、献花点灯、下载公开档案 JSON。",
-  },
-  {
-    id: "archive",
-    name: "永久安葬",
-    price: "0.5 USDC",
-    desc: "封存档案、生成内容哈希，接入 Pinata 后返回 IPFS CID。",
-  },
-  {
-    id: "guardian",
-    name: "守墓人",
-    price: "2 USDC",
-    desc: "认领纪念 NFT、展示守墓人署名，并获得长期监测席位。",
-  },
-];
-
 const evidencePackages = new Map();
 
 const cases = [
@@ -406,8 +385,7 @@ const state = {
   archiveSeals: {},
   archivePayloads: {},
   memorialActions: {},
-  nftClaims: {},
-  invoices: {},
+  credentials: {},
 };
 
 const archiveProviderCopy = {
@@ -457,21 +435,8 @@ function getActions(caseId) {
   return state.memorialActions[caseId];
 }
 
-function shortId(input, length = 12) {
-  let hash = 0;
-  const text = String(input);
-  for (let index = 0; index < text.length; index += 1) {
-    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0").slice(0, length);
-}
-
 function displayDate() {
   return new Date().toISOString().slice(0, 10);
-}
-
-function receiptId(prefix, itemId, salt = Date.now()) {
-  return `${prefix}_${itemId}_${shortId(`${itemId}:${salt}:${prefix}`, 10)}`;
 }
 
 function renderCases() {
@@ -535,22 +500,6 @@ function activateMuseumTab(tabId) {
     panel.hidden = !isActive;
     panel.classList.toggle("active", isActive);
   });
-}
-
-function renderEvidenceItem(item) {
-  const title = Array.isArray(item) ? item[0] : item.title;
-  const desc = Array.isArray(item) ? item[1] : item.desc;
-  const url = Array.isArray(item) ? item[2] : item.url;
-  const link = url
-    ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">查看来源</a>`
-    : "";
-  return `
-    <li>
-      <strong>${escapeHtml(title)}</strong>
-      <code>${escapeHtml(desc)}</code>
-      ${link}
-    </li>
-  `;
 }
 
 function renderTimeline(items = []) {
@@ -689,111 +638,170 @@ function renderMemorialActionsPanel(item) {
   `;
 }
 
-function buildNftMetadata(item, owner) {
-  return {
-    name: `Cyber Memory Witness - ${item.name}`,
-    description: `A non-transferable witness credential for ${item.name} in Cyber Memory Cemetery.`,
-    image: item.image,
-    external_url: item.originalUrl,
-    attributes: [
-      { trait_type: "Case", value: item.id },
-      { trait_type: "Status", value: item.status },
-      { trait_type: "Truth Score", value: String(item.truthScore) },
-      { trait_type: "Owner Label", value: owner || "anonymous_witness" },
-      { trait_type: "Credential Type", value: "Witness" },
-    ],
-  };
+function asStringList(value) {
+  if (typeof value === "string") return value ? [value] : [];
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item) : [];
 }
 
-function renderNftPanel(item) {
-  const claim = state.nftClaims[item.id];
+function renderModelNotes(label, items) {
+  const notes = asStringList(items);
   return `
-    <div class="detail-section nft-panel">
-      <h4>纪念 NFT 认领</h4>
-      <div class="nft-layout">
-        <div class="nft-medal" aria-hidden="true">
-          <span>${escapeHtml(item.firstSeen)}</span>
-          <strong>${escapeHtml(item.name)}</strong>
-          <em>WITNESS</em>
-        </div>
-        <div class="nft-copy">
-          <p class="text-note">
-            认领的是见证凭证，不代表所有权。真实合约接入后，可改为不可转让 SBT 或纪念 NFT。
-          </p>
-          <label for="claimOwner">认领名或钱包地址</label>
-          <input id="claimOwner" name="claimOwner" type="text" value="${escapeHtml(
-            claim?.owner || "anonymous_witness",
-          )}" />
-          <div class="archive-actions">
-            <button class="button primary" type="button" data-action="claim-nft">
-              认领见证 NFT
-            </button>
-            ${claim ? `<button class="button secondary" type="button" data-action="download-nft">下载 metadata</button>` : ""}
-          </div>
-        </div>
-      </div>
-      ${
-        claim
-          ? `
-            <ul class="request-list archive-list">
-              <li>
-                <strong>token_id</strong>
-                <code>${escapeHtml(claim.tokenId)}</code>
-              </li>
-              <li>
-                <strong>owner</strong>
-                <code>${escapeHtml(claim.owner)}</code>
-              </li>
-              <li>
-                <strong>mint_receipt</strong>
-                <code>${escapeHtml(claim.receiptId)}</code>
-              </li>
-            </ul>
-          `
-          : ""
-      }
+    <div class="model-notes">
+      <span>${escapeHtml(label)}</span>
+      ${notes.length ? `<ul>${notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul>` : "<p>无</p>"}
     </div>
   `;
 }
 
-function renderCommercePanel(item) {
-  const invoice = state.invoices[item.id];
+function renderModelCouncil(requests = []) {
   return `
-    <div class="detail-section commerce-panel">
-      <h4>安葬套餐</h4>
-      <div class="plan-grid">
-        ${burialPlans
+    <section class="model-council" aria-label="Gonka 模型会诊">
+      <div class="model-council-grid">
+        ${requests
+          .map((request) => {
+            const errors = [
+              ...asStringList(request.errors),
+              ...asStringList(request.error),
+              ...asStringList(request.riskFlags),
+            ];
+            return `
+              <article class="model-card ${request.fallback ? "fallback" : ""}">
+                <div class="model-card-head">
+                  <div>
+                    <span>${escapeHtml(request.role || "unknown_role")}</span>
+                    <strong>${escapeHtml(request.model || "unknown_model")}</strong>
+                  </div>
+                  <b>${escapeHtml(request.truthScore ?? "不可计算")}</b>
+                </div>
+                <p>${escapeHtml(request.summary || "模型未返回摘要。")}</p>
+                <code class="request-id">Request ID: ${escapeHtml(request.requestId || "不可用")}</code>
+                ${renderModelNotes("已核事实", request.verifiedFacts)}
+                ${renderModelNotes("不确定项", request.uncertainClaims)}
+                ${renderModelNotes("错误与风险", errors)}
+              </article>
+            `;
+          })
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderVerificationState(verification) {
+  const presentation = CemeteryCore.verificationPresentation(verification);
+  return `
+    <section class="verification-state ${presentation.tone}" aria-label="验证状态">
+      <span>Verification State</span>
+      <strong>${escapeHtml(presentation.label)}</strong>
+      <p>${presentation.verified ? "Gonka 请求已形成可审计验证结果。" : "当前结果不具备实时共识证明。"}</p>
+    </section>
+  `;
+}
+
+function renderConsensusMeter(verification) {
+  const presentation = CemeteryCore.verificationPresentation(verification);
+  const confidence = Number(verification?.consensusConfidence || 0);
+  return `<section class="consensus-meter ${presentation.tone}">
+    <span>${escapeHtml(presentation.label)}</span>
+    <strong>${confidence}% 共识置信度</strong>
+    <div class="consensus-track"><i style="width:${confidence}%"></i></div>
+    <p>模型评分差 ${escapeHtml(verification?.scoreSpread ?? "不可计算")} 分</p>
+  </section>`;
+}
+
+function publicEvidenceClaims(item) {
+  const packaged = evidencePackages.get(item.id)?.claims;
+  if (Array.isArray(packaged) && packaged.length) {
+    return packaged.filter((claim) => claim.publicArchiveAllowed !== false);
+  }
+  return (item.evidence || []).map((evidence, index) => ({
+    id: `${item.id}-evidence-${index + 1}`,
+    claim: Array.isArray(evidence) ? evidence[1] : evidence.desc,
+    sourceTitle: Array.isArray(evidence) ? evidence[0] : evidence.title,
+    sourceDate: "未注明",
+    sourceUrl: Array.isArray(evidence) ? evidence[2] : evidence.url,
+    confidence: "context",
+  }));
+}
+
+function evidenceConfidenceLabel(confidence) {
+  const labels = {
+    primary: "一级来源",
+    secondary: "二级来源",
+    context: "背景证据",
+  };
+  return labels[confidence] || labels.context;
+}
+
+function renderEvidenceConfidence(item) {
+  const claims = publicEvidenceClaims(item);
+  return `
+    <div class="detail-section evidence-confidence">
+      <h4>公开证据置信度</h4>
+      <div class="evidence-confidence-grid">
+        ${claims
           .map(
-            (plan) => `
-              <article class="plan-card ${invoice?.planId === plan.id ? "selected" : ""}">
-                <strong>${escapeHtml(plan.name)}</strong>
-                <code>${escapeHtml(plan.price)}</code>
-                <span>${escapeHtml(plan.desc)}</span>
-                <button class="button secondary" type="button" data-action="select-plan" data-plan-id="${escapeHtml(plan.id)}">
-                  生成账单
-                </button>
+            (claim) => `
+              <article class="evidence-claim ${escapeHtml(claim.confidence || "context")}">
+                <span>${escapeHtml(evidenceConfidenceLabel(claim.confidence))}</span>
+                <strong>${escapeHtml(claim.claim)}</strong>
+                <dl>
+                  <div><dt>来源</dt><dd>${escapeHtml(claim.sourceTitle)}</dd></div>
+                  <div><dt>日期</dt><dd>${escapeHtml(claim.sourceDate || "未注明")}</dd></div>
+                </dl>
+                ${
+                  claim.sourceUrl
+                    ? `<a href="${escapeHtml(claim.sourceUrl)}" target="_blank" rel="noreferrer">查看外部来源</a>`
+                    : `<span class="source-unavailable">来源链接未提供</span>`
+                }
               </article>
             `,
           )
           .join("")}
       </div>
+    </div>
+  `;
+}
+
+function renderCredentialPanel(item, archiveSeal) {
+  const credential = state.credentials[item.id];
+  const disabled = archiveSeal ? "" : "disabled";
+  return `
+    <div class="detail-section credential-panel">
+      <h4>纪念凭证</h4>
+      <div class="credential-layout">
+        <div class="credential-preview" aria-label="纪念凭证预览">
+          <span>${escapeHtml(item.firstSeen)}-${escapeHtml(item.lastSeen)}</span>
+          <strong>${escapeHtml(item.name)}</strong>
+          <em>MEMORIAL CREDENTIAL</em>
+          <code>${escapeHtml(credential?.id || "等待封存回执")}</code>
+        </div>
+        <div class="credential-copy">
+          <p class="text-note">
+            ${archiveSeal ? "凭证由可验证封存回执生成，链上状态为待认领。" : "先完成可验证封存，系统才能依据回执生成纪念凭证。"}
+          </p>
+          <div class="archive-actions">
+            <button class="button primary" type="button" data-action="generate-credential" ${disabled}>
+              生成纪念凭证
+            </button>
+            ${
+              credential
+                ? `<button class="button secondary" type="button" data-action="download-credential">下载凭证 JSON</button>
+                   <button class="button secondary" type="button" data-action="download-credential-metadata">下载链上兼容 metadata</button>`
+                : ""
+            }
+          </div>
+        </div>
+      </div>
       ${
-        invoice
+        credential
           ? `
-            <ul class="request-list archive-list">
-              <li>
-                <strong>invoice_id</strong>
-                <code>${escapeHtml(invoice.invoiceId)}</code>
-              </li>
-              <li>
-                <strong>payment_route</strong>
-                <code>${escapeHtml(invoice.paymentRoute)}</code>
-              </li>
-              <li>
-                <strong>amount</strong>
-                <code>${escapeHtml(invoice.amount)}</code>
-              </li>
-            </ul>
+            <dl class="credential-artifacts">
+              <div><dt>Credential ID</dt><dd>${escapeHtml(credential.id)}</dd></div>
+              <div><dt>Archive Hash</dt><dd>${escapeHtml(credential.contentHash)}</dd></div>
+              <div><dt>Verification State</dt><dd>${escapeHtml(credential.verificationState)}</dd></div>
+              <div><dt>Claim Status</dt><dd>待链上认领</dd></div>
+            </dl>
           `
           : ""
       }
@@ -807,108 +815,30 @@ function compactHash(value, head = 14, tail = 8) {
   return `${text.slice(0, head)}...${text.slice(-tail)}`;
 }
 
-function parseUsdc(amount) {
-  const parsed = Number.parseFloat(String(amount || "0").replace(/[^\d.]/g, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatUsdc(amount) {
-  const fixed = Number(amount).toFixed(2);
-  return `${fixed.replace(/\.00$/, "")} USDC`;
-}
-
-function longTraceId(seed) {
-  let hex = "";
-  let index = 0;
-  while (hex.length < 64) {
-    hex += shortId(`${seed}:${index}`, 8);
-    index += 1;
-  }
-  return `0x${hex.slice(0, 64)}`;
-}
-
-function kiteLedgerFor(item) {
-  const invoice = state.invoices[item.id];
-  const archiveSeal = state.archiveSeals[item.id];
-  const claim = state.nftClaims[item.id];
-  const storageSpend = archiveSeal ? 0.5 : 0;
-  const planSpend = invoice ? parseUsdc(invoice.amount) : 0;
-  const nftSpend = claim ? 0.1 : 0;
-  const spent = storageSpend + planSpend + nftSpend;
-  const allowance = 3;
-  const remaining = Math.max(allowance - spent, 0);
-  const txSeed = `${item.id}:${invoice?.invoiceId || "no-invoice"}:${archiveSeal?.contentHash || "no-archive"}:${claim?.tokenId || "no-claim"}`;
-
-  return {
-    allowance,
-    spent,
-    remaining,
-    txHash: longTraceId(txSeed),
-    entries: [
-      {
-        label: "Storage API",
-        amount: formatUsdc(storageSpend),
-        status: archiveSeal ? "paid" : "standby",
-      },
-      {
-        label: "Burial Plan",
-        amount: invoice ? invoice.amount : "0 USDC",
-        status: invoice ? "authorized" : "pending",
-      },
-      {
-        label: "NFT Metadata",
-        amount: formatUsdc(nftSpend),
-        status: claim ? "prepared" : "pending",
-      },
-    ],
-  };
-}
 
 function archiveReadinessFor(item, archiveSeal, requests) {
-  const actions = getActions(item.id);
-  const claim = state.nftClaims[item.id];
-  const invoice = state.invoices[item.id];
-  return [
-    {
-      label: "公开证据",
-      value: `${item.evidence.length} 条`,
-      ready: item.evidence.length > 0,
-    },
-    {
-      label: "模型会诊",
-      value: `${requests.length} 个 Request ID`,
-      ready: requests.length >= 2,
-    },
-    {
-      label: "纪念册",
-      value: `${actions.messages.length} 条留言`,
-      ready: actions.messages.length > 0,
-    },
-    {
-      label: "见证凭证",
-      value: claim ? "已认领" : "待认领",
-      ready: Boolean(claim),
-    },
-    {
-      label: "Kite 账单",
-      value: invoice ? invoice.amount : "待生成",
-      ready: Boolean(invoice),
-    },
-    {
-      label: "永久封存",
-      value: archiveSeal ? archiveSeal.status : "待封存",
-      ready: Boolean(archiveSeal),
-    },
-  ];
+  const evidenceCount = publicEvidenceClaims(item).length;
+  const credential = state.credentials[item.id];
+  const values = {
+    公开证据: `${evidenceCount} 条公开摘要`,
+    模型会诊: `${requests.length} 个 Request ID`,
+    永久封存: archiveSeal ? archiveSeal.status : "待封存",
+    纪念凭证: credential ? credential.id : "待生成",
+  };
+  return CemeteryCore.archiveReadiness({
+    evidenceCount,
+    requestCount: requests.length,
+    archiveSeal,
+    credential,
+  }).map((entry) => ({ ...entry, value: values[entry.label] }));
 }
 
 function renderTombstoneCraftPanel(item, archiveSeal) {
   const actions = getActions(item.id);
-  const claim = state.nftClaims[item.id];
-  const invoice = state.invoices[item.id];
+  const credential = state.credentials[item.id];
   const sealText = archiveSeal ? compactHash(archiveSeal.contentHash, 16, 10) : "等待封存";
-  const tokenText = claim ? compactHash(claim.tokenId, 16, 8) : "未认领";
-  const paymentText = invoice ? `${invoice.planName} / ${invoice.amount}` : "未选择套餐";
+  const credentialText = credential ? compactHash(credential.id, 16, 8) : "待生成";
+  const ipfsText = archiveSeal?.provider === "pinata-ipfs" ? archiveSeal.status : "待上传";
   const elements = [
     {
       label: "碑名",
@@ -926,19 +856,19 @@ function renderTombstoneCraftPanel(item, archiveSeal) {
       note: "封存后写入 content hash，演示时可下载 JSON。",
     },
     {
-      label: "见证凭证",
-      value: tokenText,
-      note: "用户可认领纪念 NFT 或 SBT，不代表内容所有权。",
+      label: "纪念凭证",
+      value: credentialText,
+      note: "由封存回执生成，当前仅标记为待链上认领。",
     },
     {
       label: "纪念热度",
       value: `${actions.flowers} 花 / ${actions.candles} 灯`,
-      note: "社区动作会进入永久档案 payload。",
+      note: "永久档案只记录聚合数量，不上传署名和留言正文。",
     },
     {
-      label: "商业入口",
-      value: paymentText,
-      note: "Kite Agent Passport 负责授权额度内的自动支付。",
+      label: "IPFS 状态",
+      value: ipfsText,
+      note: "配置存储服务后返回 CID，本地回退会明确标注。",
     },
   ];
 
@@ -963,8 +893,7 @@ function renderTombstoneCraftPanel(item, archiveSeal) {
 }
 
 function renderProofChainBoard(item, archiveSeal, requests, verificationSource) {
-  const claim = state.nftClaims[item.id];
-  const invoice = state.invoices[item.id];
+  const credential = state.credentials[item.id];
   const actions = getActions(item.id);
   const chain = [
     {
@@ -987,15 +916,9 @@ function renderProofChainBoard(item, archiveSeal, requests, verificationSource) 
     },
     {
       label: "Witness",
-      value: claim ? compactHash(claim.tokenId, 16, 8) : "pending",
-      note: claim ? `owner ${claim.owner}` : "等待认领见证 NFT。",
-      ready: Boolean(claim),
-    },
-    {
-      label: "Payment",
-      value: invoice ? invoice.amount : "pending",
-      note: invoice ? invoice.invoiceId : "等待生成 Kite 账单。",
-      ready: Boolean(invoice),
+      value: credential ? compactHash(credential.id, 16, 8) : "pending",
+      note: credential ? "纪念凭证已生成，链上状态为待认领。" : "等待封存后生成纪念凭证。",
+      ready: Boolean(credential),
     },
     {
       label: "Community",
@@ -1034,105 +957,6 @@ function renderProofChainBoard(item, archiveSeal, requests, verificationSource) 
   `;
 }
 
-function renderBusinessFunnel(item) {
-  const invoice = state.invoices[item.id];
-  const claim = state.nftClaims[item.id];
-  const archiveSeal = state.archiveSeals[item.id];
-  const funnel = [
-    {
-      stage: "免费吊唁",
-      metric: "0 USDC",
-      desc: "用户进入墓碑页，献花、点灯、留言，形成社交传播入口。",
-      status: "open",
-    },
-    {
-      stage: "永久安葬",
-      metric: archiveSeal ? "已封存" : "0.5 USDC",
-      desc: "Agent 打包 JSON，付费上传 IPFS、Arweave 或 Irys。",
-      status: archiveSeal ? "done" : "ready",
-    },
-    {
-      stage: "守墓人",
-      metric: claim ? "已认领" : "2 USDC",
-      desc: "用户认领见证 NFT，获得守墓人署名和后续监测权益。",
-      status: claim ? "done" : "ready",
-    },
-    {
-      stage: "机构策展",
-      metric: invoice ? invoice.amount : "B2B",
-      desc: "文博机构、社区管理员或品牌方批量封存濒危数字资产。",
-      status: invoice ? "done" : "ready",
-    },
-  ];
-
-  return `
-    <section class="business-funnel" aria-label="商业转化链路">
-      <div class="proof-board-head">
-        <div>
-          <span>Commercial Loop</span>
-          <strong>从吊唁到付费安葬</strong>
-        </div>
-        <code>Kite Agent Payable</code>
-      </div>
-      <div class="funnel-grid">
-        ${funnel
-          .map(
-            (entry) => `
-              <article class="${escapeHtml(entry.status)}">
-                <span>${escapeHtml(entry.stage)}</span>
-                <strong>${escapeHtml(entry.metric)}</strong>
-                <p>${escapeHtml(entry.desc)}</p>
-              </article>
-            `,
-          )
-          .join("")}
-      </div>
-    </section>
-  `;
-}
-
-function renderKiteLedgerPanel(item) {
-  const ledger = kiteLedgerFor(item);
-  return `
-    <section class="kite-ledger" aria-label="Kite 支付账本">
-      <div class="proof-board-head">
-        <div>
-          <span>Kite Ledger</span>
-          <strong>Agent 授权额度和支付痕迹</strong>
-        </div>
-        <code>${escapeHtml(ledger.txHash)}</code>
-      </div>
-      <div class="ledger-summary">
-        <div>
-          <span>Allowance</span>
-          <strong>${formatUsdc(ledger.allowance)}</strong>
-        </div>
-        <div>
-          <span>Spent</span>
-          <strong>${formatUsdc(ledger.spent)}</strong>
-        </div>
-        <div>
-          <span>Remaining</span>
-          <strong>${formatUsdc(ledger.remaining)}</strong>
-        </div>
-      </div>
-      <ul class="ledger-list">
-        ${ledger.entries
-          .map(
-            (entry) => `
-              <li>
-                <span>${escapeHtml(entry.label)}</span>
-                <strong>${escapeHtml(entry.amount)}</strong>
-                <code>${escapeHtml(entry.status)}</code>
-              </li>
-            `,
-          )
-          .join("")}
-      </ul>
-    </section>
-  `;
-}
-
 function renderArchiveReadinessPanel(item, archiveSeal, requests) {
   const readiness = archiveReadinessFor(item, archiveSeal, requests);
   const readyCount = readiness.filter((entry) => entry.ready).length;
@@ -1159,30 +983,6 @@ function renderArchiveReadinessPanel(item, archiveSeal, requests) {
           .join("")}
       </div>
     </section>
-  `;
-}
-
-function renderCouncilBrief(requests, verificationSource) {
-  return `
-    <div class="council-brief" aria-label="Gonka 专家会诊摘要">
-      <div>
-        <span>Consensus Mode</span>
-        <strong>${escapeHtml(verificationSource)}</strong>
-        <p>两个模型分别负责文化考古和事实校验，最终分数取可解释共识。</p>
-      </div>
-      ${requests
-        .map(
-          (request, index) => `
-            <div>
-              <span>Expert ${index + 1}</span>
-              <strong>${escapeHtml(request.role)}</strong>
-              <code>${escapeHtml(request.model)}</code>
-              <p>${escapeHtml(compactHash(request.requestId, 18, 8))}</p>
-            </div>
-          `,
-        )
-        .join("")}
-    </div>
   `;
 }
 
@@ -1263,7 +1063,11 @@ function renderConsoleWorkbench(item, liveArchive, verification, requests, verif
           <code>${escapeHtml(verificationSource)}</code>
         </div>
       </div>
-      ${renderCouncilBrief(requests, verificationSource)}
+      <div class="verification-summary-grid">
+        ${renderVerificationState(verification)}
+        ${renderConsensusMeter(verification)}
+      </div>
+      ${renderModelCouncil(requests)}
       <ol class="console-event-list">
         ${rounds
           .map(
@@ -1279,20 +1083,6 @@ function renderConsoleWorkbench(item, liveArchive, verification, requests, verif
           )
           .join("")}
       </ol>
-      <div class="console-model-list">
-        ${requests
-          .map(
-            (request) => `
-              <div>
-                <span>${escapeHtml(request.role)}</span>
-                <strong>${escapeHtml(request.model)}</strong>
-                <code>${escapeHtml(request.requestId)}</code>
-                <p>${escapeHtml(request.summary)}</p>
-              </div>
-            `,
-          )
-          .join("")}
-      </div>
     </article>
   `;
 }
@@ -1302,38 +1092,34 @@ function renderArchiveWorkbench(item, archiveSeal) {
   if (!target) return;
 
   const actions = getActions(item.id);
-  const claim = state.nftClaims[item.id];
-  const invoice = state.invoices[item.id];
+  const credential = state.credentials[item.id];
+  const evidenceCount = publicEvidenceClaims(item).length;
   const provider = archiveSeal ? archiveProviderCopy[archiveSeal.provider] || archiveSeal.provider : "pending";
 
   target.innerHTML = `
     <div class="archive-workbench-grid">
       <article>
-        <span>Community Ledger</span>
+        <span>Evidence Confidence</span>
+        <strong>${evidenceCount} 条公开证据</strong>
+        <p>只封存事实摘要、来源标题、日期和外部链接。</p>
+        <button class="button secondary" type="button" data-museum-tab="exhibit">查看证据</button>
+      </article>
+      <article>
+        <span>Memorial Credential</span>
+        <strong>${escapeHtml(credential?.id || "待生成")}</strong>
+        <p>${credential ? "凭证已生成，链上状态为待认领。" : "完成封存后生成凭证和链上兼容 metadata。"}</p>
+        <button class="button secondary" type="button" data-action="generate-credential" ${archiveSeal ? "" : "disabled"}>
+          生成凭证
+        </button>
+      </article>
+      <article>
+        <span>Community Summary</span>
         <strong>${actions.flowers} flowers / ${actions.candles} lights</strong>
-        <p>永久档案仅记录献花、点灯和留言数量；留言内容仅保留在本地，不会上传。</p>
-        <button class="button secondary" type="button" data-museum-tab="exhibit">
-          去纪念册
-        </button>
+        <p>永久档案仅记录献花、点灯和留言数量。留言内容仅保留在本地，不会上传。署名同样不会进入永久档案。</p>
+        <button class="button secondary" type="button" data-museum-tab="exhibit">去纪念册</button>
       </article>
       <article>
-        <span>Witness Credential</span>
-        <strong>${escapeHtml(claim?.tokenId || "未认领")}</strong>
-        <p>${claim ? `owner ${escapeHtml(claim.owner)}` : "认领后生成 metadata 与 mint receipt。"}</p>
-        <button class="button secondary" type="button" data-museum-tab="exhibit">
-          去认领
-        </button>
-      </article>
-      <article>
-        <span>Kite Invoice</span>
-        <strong>${escapeHtml(invoice?.amount || "2 USDC")}</strong>
-        <p>${invoice ? escapeHtml(invoice.invoiceId) : "演示 Agent 授权额度内的守墓人套餐账单。"}</p>
-        <button class="button secondary" type="button" data-action="select-plan" data-plan-id="guardian">
-          生成账单
-        </button>
-      </article>
-      <article>
-        <span>Storage Receipt</span>
+        <span>IPFS 状态</span>
         <strong>${escapeHtml(provider)}</strong>
         <p>${archiveSeal ? escapeHtml(archiveSeal.archiveId) : "封存后返回内容哈希和存储 ID。"}</p>
         <button class="button primary" type="button" data-action="seal-archive">
@@ -1356,8 +1142,6 @@ function renderArchiveWorkbench(item, archiveSeal) {
       archiveSeal,
       state.currentMemorial?.verification?.requests || item.requests.map(normalizePresetRequest),
     )}
-    ${renderKiteLedgerPanel(item)}
-    ${renderBusinessFunnel(item)}
   `;
 }
 
@@ -1373,14 +1157,23 @@ function normalizePresetRequest(request) {
       role,
       model: "preset",
       requestId,
+      truthScore: null,
       summary: "预置演示轨迹，等待 Gonka Router 实时验证。",
+      verifiedFacts: [],
+      uncertainClaims: [],
+      riskFlags: [],
     };
   }
   return {
     role: request.role,
     model: request.model || "preset",
     requestId: request.requestId,
+    truthScore: request.truthScore ?? null,
     summary: request.summary || "预置演示轨迹，等待 Gonka Router 实时验证。",
+    verifiedFacts: request.verifiedFacts || [],
+    uncertainClaims: request.uncertainClaims || [],
+    riskFlags: request.riskFlags || [],
+    fallback: Boolean(request.fallback),
   };
 }
 
@@ -1408,16 +1201,6 @@ function buildArchivePayload(item, liveArchive, verification) {
   const firstSeen = liveArchive?.firstYear || item.firstSeen;
   const lastSeen = liveArchive?.lastYear || item.lastSeen;
   const actions = getActions(item.id);
-  const kiteLedger = kiteLedgerFor(item);
-  if (!state.archiveSeals[item.id]) {
-    kiteLedger.spent += 0.5;
-    kiteLedger.remaining = Math.max(kiteLedger.allowance - kiteLedger.spent, 0);
-    kiteLedger.entries[0] = {
-      label: "Storage API",
-      amount: "0.5 USDC",
-      status: "authorized",
-    };
-  }
   const verificationSource =
     verification?.source === "gonka"
       ? "gonka-live"
@@ -1463,17 +1246,6 @@ function buildArchivePayload(item, liveArchive, verification) {
       ],
       tombstoneImage: item.image,
     },
-    nftClaim: state.nftClaims[item.id] || null,
-    invoice: state.invoices[item.id] || null,
-    monetization: {
-      model: "free memorial visit + paid permanent burial + paid guardian claim",
-      kiteAgentPassport: {
-        ownerAllowance: "3 USDC demo allowance",
-        paymentRoute: "Kite Agent Passport demo allowance",
-        ledger: kiteLedger,
-      },
-      plans: burialPlans,
-    },
     archiveProbe: {
       source: liveArchive?.source || "local-demo",
       count: archiveCount,
@@ -1484,6 +1256,10 @@ function buildArchivePayload(item, liveArchive, verification) {
       source: verificationSource,
       verificationState: verification?.verificationState || "demo_fallback",
       truthScore: verification?.truthScore || item.truthScore,
+      scoreSpread: verification?.scoreSpread ?? null,
+      consensusConfidence: verification?.consensusConfidence || 0,
+      sealEligibility: verification?.sealEligibility || "draft",
+      cacheStatus: verification?.cacheStatus || "not_cached_local_preset",
       requests: verification?.requests || item.requests.map(normalizePresetRequest),
       notes: verification?.notes || [],
     },
@@ -1630,38 +1406,21 @@ function renderMemorial(item, liveArchive, verification) {
           <span>模型共识</span>
         </div>
       </div>
+      <div class="verification-summary-grid">
+        ${renderVerificationState(verification)}
+        ${renderConsensusMeter(verification)}
+      </div>
+      ${renderModelCouncil(requests)}
+      ${renderEvidenceConfidence(item)}
       ${renderRelicPanel(item)}
       ${renderTombstoneCraftPanel(item, archiveSeal)}
       ${renderMemorialActionsPanel(item)}
-      ${renderNftPanel(item)}
-      ${renderCommercePanel(item)}
+      ${renderCredentialPanel(item, archiveSeal)}
       ${renderTimeline(item.timeline)}
-      <div class="detail-section">
-        <h4>证据链</h4>
-        <ul class="evidence-list">
-          ${item.evidence.map(renderEvidenceItem).join("")}
-        </ul>
-      </div>
       ${renderListSection("可验证事实", item.verifiableFacts)}
       ${renderListSection("需要谨慎标注的不确定项", item.uncertainClaims, "risk-list")}
       ${renderTextSection("隐私边界", item.privacyBoundary)}
       ${renderTextSection("Demo 讲法", item.demoAngle)}
-      <div class="detail-section">
-        <h4>Gonka 推理轨迹</h4>
-        <ul class="request-list">
-          ${requests
-            .map(
-              (request) => `
-                <li>
-                  <strong>${escapeHtml(request.role)} / ${escapeHtml(request.model)}</strong>
-                  <span>${escapeHtml(request.summary)}</span>
-                  <code>${escapeHtml(request.requestId)}</code>
-                </li>
-              `,
-            )
-            .join("")}
-        </ul>
-      </div>
       ${renderListSection("验证备注", verification?.notes, "risk-list")}
       ${renderAgentLogPanel(item, requests, verificationSource)}
       ${renderArchivePanel(item, archiveSeal)}
@@ -1760,6 +1519,7 @@ function refreshCurrentMemorial() {
 function invalidateArchive(caseId) {
   delete state.archiveSeals[caseId];
   delete state.archivePayloads[caseId];
+  delete state.credentials[caseId];
 }
 
 function addFlower() {
@@ -1798,65 +1558,51 @@ function submitGuestbook(form) {
   setAgentState("纪念册已更新");
 }
 
-async function claimWitnessNft() {
+function generateMemorialCredential() {
   const current = state.currentMemorial;
   if (!current) return;
-  const ownerInput = byId("claimOwner");
-  const owner = ownerInput?.value?.trim() || "anonymous_witness";
-  const createdAt = new Date().toISOString();
-  const metadata = buildNftMetadata(current.item, owner);
-  const tokenSeed = stableJson({ caseId: current.item.id, owner, createdAt, metadata });
-  const tokenHash = await CemeteryCore.sha256Hex(tokenSeed, globalThis.crypto);
-  const tokenId = `cmc-${current.item.id}-${tokenHash.slice(0, 12)}`;
-  state.nftClaims[current.item.id] = {
-    tokenId,
-    owner,
-    receiptId: receiptId("mint", current.item.id, tokenHash),
-    contract: "0xCemeteryWitnessDemo000000000000000000000000",
-    standard: "ERC-721 demo metadata",
-    createdAt,
-    metadata,
-    metadataJson: stableJson(metadata),
-  };
-  invalidateArchive(current.item.id);
+  const archiveSeal = state.archiveSeals[current.item.id];
+  if (!archiveSeal) {
+    setAgentState("请先完成可验证封存");
+    return;
+  }
+
+  state.credentials[current.item.id] = CemeteryCore.createCredential(current.item, archiveSeal);
   refreshCurrentMemorial();
-  setAgentState("已认领：见证 NFT");
+  setAgentState("已生成：纪念凭证");
 }
 
-function downloadNftMetadata() {
-  const current = state.currentMemorial;
-  if (!current) return;
-  const claim = state.nftClaims[current.item.id];
-  if (!claim) return;
-
-  const blob = new Blob([claim.metadataJson], { type: "application/json;charset=utf-8" });
+function downloadJsonArtifact(filename, value) {
+  const blob = new Blob([stableJson(value)], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${claim.tokenId}.metadata.json`;
+  link.download = filename;
   document.body.append(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-  setAgentState("已下载：NFT metadata");
 }
 
-function selectBurialPlan(planId) {
+function downloadMemorialCredential() {
   const current = state.currentMemorial;
   if (!current) return;
-  const plan = burialPlans.find((entry) => entry.id === planId) || burialPlans[0];
-  state.invoices[current.item.id] = {
-    invoiceId: receiptId("kite_invoice", current.item.id, plan.id),
-    planId: plan.id,
-    planName: plan.name,
-    amount: plan.price,
-    paymentRoute: "Kite Agent Passport demo allowance",
-    status: "pending-demo",
-    createdAt: new Date().toISOString(),
-  };
-  invalidateArchive(current.item.id);
-  refreshCurrentMemorial();
-  setAgentState("已生成：安葬账单");
+  const credential = state.credentials[current.item.id];
+  if (!credential) return;
+
+  downloadJsonArtifact(`${credential.id}.credential.json`, credential);
+  setAgentState("已下载：纪念凭证 JSON");
+}
+
+function downloadCredentialMetadata() {
+  const current = state.currentMemorial;
+  if (!current) return;
+  const credential = state.credentials[current.item.id];
+  if (!credential) return;
+
+  const metadata = CemeteryCore.createNftReadyMetadata(credential, current.item);
+  downloadJsonArtifact(`${credential.id}.metadata.json`, metadata);
+  setAgentState("已下载：链上兼容 metadata");
 }
 
 function selectCase(id, updateInput = true) {
@@ -1868,6 +1614,11 @@ function selectCase(id, updateInput = true) {
   }
   renderMemorial(item);
   updateCaseSelection();
+  loadEvidencePackage(item.id)
+    .then((evidencePackage) => {
+      if (evidencePackage && state.currentMemorial?.item.id === item.id) refreshCurrentMemorial();
+    })
+    .catch(() => {});
 }
 
 function setAgentState(text) {
@@ -2025,14 +1776,14 @@ function init() {
     if (action === "light-candle") {
       lightCandle();
     }
-    if (action === "claim-nft") {
-      await claimWitnessNft();
+    if (action === "generate-credential") {
+      generateMemorialCredential();
     }
-    if (action === "download-nft") {
-      downloadNftMetadata();
+    if (action === "download-credential") {
+      downloadMemorialCredential();
     }
-    if (action === "select-plan") {
-      selectBurialPlan(actionButton.getAttribute("data-plan-id"));
+    if (action === "download-credential-metadata") {
+      downloadCredentialMetadata();
     }
     if (action === "seal-archive") {
       await sealCurrentArchive();

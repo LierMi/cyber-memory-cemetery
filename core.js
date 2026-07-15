@@ -32,6 +32,21 @@
     };
   }
 
+  function createNftReadyMetadata(credential, item) {
+    return {
+      name: credential.name,
+      description: "Future-compatible memorial credential metadata for a verified digital archive.",
+      image: item.image || credential.image,
+      external_url: item.originalUrl || credential.archiveId,
+      attributes: [
+        { trait_type: "Claim Status", value: "Pending on-chain claim" },
+        { trait_type: "Archive Hash", value: credential.contentHash },
+        { trait_type: "Verification State", value: credential.verificationState },
+        { trait_type: "Truth Score", value: credential.truthScore },
+      ],
+    };
+  }
+
   function archiveCommunitySummary(actions) {
     const messages = Array.isArray(actions?.messages) ? actions.messages : [];
     return {
@@ -165,6 +180,7 @@
   return {
     verificationPresentation,
     createCredential,
+    createNftReadyMetadata,
     archiveCommunitySummary,
     sha256Hex,
     createLocalArchiveSeal,
