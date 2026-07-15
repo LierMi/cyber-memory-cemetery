@@ -25,6 +25,26 @@ test("credential is derived from the archive receipt", () => {
   assert.equal(credential.issuedAt, "2026-07-15T12:00:00Z");
 });
 
+test("credential IDs distinguish full SHA-256 hashes with the same prefix", () => {
+  const item = { id: "xiami", name: "虾米音乐", image: "./assets/case-xiami.png" };
+  const receipt = {
+    archiveId: "ipfs://cid",
+    contentCreatedAt: "2026-07-15T12:00:00Z",
+    verificationState: "live_consensus",
+    truthScore: 89,
+  };
+  const first = core.createCredential(item, {
+    ...receipt,
+    contentHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+  });
+  const second = core.createCredential(item, {
+    ...receipt,
+    contentHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+  });
+
+  assert.notEqual(first.id, second.id);
+});
+
 test("demo state stops on failure and resumes on retry", () => {
   const failed = core.nextDemoState({ step: 2, status: "running" }, "failure");
   assert.deepEqual(failed, { step: 2, status: "failed" });

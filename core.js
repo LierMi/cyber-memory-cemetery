@@ -15,7 +15,7 @@
   }
 
   function createCredential(item, seal) {
-    const compact = String(seal.contentHash).replace(/[^a-zA-Z0-9]/g, "").slice(0, 12);
+    const compact = String(seal.contentHash).replace(/[^a-zA-Z0-9]/g, "");
     return {
       schema: "cyber-memory-cemetery/credential/v1",
       id: `witness-${compact}`,
