@@ -14,6 +14,12 @@ class CemeteryCoreTests(unittest.TestCase):
         self.assertEqual(normalize_score(8.6, 0), 86)
         self.assertEqual(normalize_score(91, 0), 91)
 
+    def test_normalize_score_rejects_non_finite_values(self):
+        fallback = 17
+        for value in (float("nan"), float("inf"), float("-inf"), "nan", "inf", "-inf"):
+            with self.subTest(value=value):
+                self.assertEqual(normalize_score(value, fallback), fallback)
+
     def test_two_live_models_create_live_consensus(self):
         result = aggregate_consensus(
             [

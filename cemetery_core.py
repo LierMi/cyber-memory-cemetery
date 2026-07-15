@@ -1,11 +1,14 @@
 import hashlib
 import json
+import math
 
 
 def normalize_score(value, fallback):
     try:
         score = float(value)
     except (TypeError, ValueError):
+        return fallback
+    if not math.isfinite(score):
         return fallback
     if 0 < score <= 10:
         score *= 10
