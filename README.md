@@ -1,94 +1,139 @@
 # 赛博记忆公墓
 
-逛一座链上公墓，吊唁死去的 Web2 社区。
+赛博记忆公墓是一个 Gonka-first 黑客松应用。它以虾米音乐为主案例，整理公开的 Web2 遗址证据，调用 Gonka Router 的两个不同模型进行交叉验证，并生成 Truth Score、分数差、共识置信度、Request ID、可验证档案和可下载的纪念凭证。
 
-这是一个黑客松 MVP：用户输入消失网站 URL，Agent 搜索网页残骸，通过本地代理调用 Gonka Router 做多模型交叉验真，生成 Truth Score、Request ID、证据链和数字墓志铭。
+这是一个原生 HTML、CSS、JavaScript 前端和 Python 本地代理组成的 MVP。前端不持有 Gonka 或 Pinata 密钥。
 
-## 当前版本
+## 事实状态
 
-- 原生前端 + Python 本地代理，无 npm 依赖
-- 深度案例：人人网 / 校内网、虾米音乐
-- 备用入口：网易博客、天涯社区、猫扑网
-- 虾米音乐预置了本地实测 Gonka Request ID：`devshard-23538-19653`、`devshard-23542-679`
-- Wayback Machine CDX API 实时查询尝试
-- Gonka API 未配置时自动使用本地演示数据兜底，保证现场可跑
-- 墓碑详情页、时间线、证据链、隐私边界、Gonka Request ID、永久档案 JSON
-- 开屏页、遗物清单、纪念册献花点灯、访客留言
-- Digital Pompeii 风格 UI：左侧遗址列表、右侧墓碑详情、调查控制台、封存计划
-- 墓碑元素配置：碑名、墓志铭、证据火漆、见证凭证、纪念热度、商业入口
-- Gonka 专家会诊面板：数字考古员和真相校验员双模型交叉验证
-- 纪念 NFT 认领演示：生成 token id、mint receipt 和 metadata JSON
-- 安葬套餐演示：见证席、永久安葬、守墓人账单，后续可接 Kite Agent Passport
-- Kite 支付账本演示：展示 Agent 授权额度、支出、余额和链上 trace
-- 档案就绪清单：公开证据、模型会诊、纪念册、NFT、账单、永久封存状态
-- 服务端封存动作：生成 SHA-256 内容哈希、存储 ID，并下载包含纪念册、NFT、账单、墓碑设计和商业闭环的 JSON
-- 可选真实 IPFS：配置 `PINATA_JWT` 后，封存按钮会通过 Pinata 上传 JSON 并返回 `ipfs://` CID
+验证状态决定页面标签和档案资格：
 
-## 本地运行
+| 状态 | 含义 | 档案资格 |
+| --- | --- | --- |
+| `live_consensus` | 本次请求由两个不同的 Gonka 模型成功返回，且具有真实 Request ID | `verified` |
+| `cached_live` | 当前实时请求失败后，恢复之前成功的 `live_consensus` 缓存 | `verified`，但不代表当前实时验证 |
+| `partial` | 只有一个真实 Gonka 模型成功 | `draft`，不宣称已达成共识 |
+| `mock_fallback` / `demo_fallback` | 未配置密钥，或实时请求失败且没有可用缓存时的本地演示结果 | `draft`，Request ID 以 `mock_` 开头 |
 
-先从 Gonka Dashboard 获取 API Key，然后设置环境变量：
+存储状态与验证状态是两件独立的事：
 
-```bash
-export GONKA_API_KEY="你的 Gonka API Key"
-export GONKA_BASE_URL="https://api.gonkascan.com/v1"
-export GONKA_MODEL="auto"
-export GONKA_ARCHAEOLOGIST_MODEL="auto"
-export GONKA_VERIFIER_MODEL="auto"
-export GONKA_MODEL_PREFERENCE="MiniMaxAI/MiniMax-M2.7,moonshotai/Kimi-K2.6"
+| provider | 含义 |
+| --- | --- |
+| `local-sealed` | 规范化 JSON 已计算 SHA-256，返回 `local://sha256/...` 标识并可下载。它只是本地封存，不是永久存储证明。 |
+| `pinata-ipfs` | 只在配置 `PINATA_JWT` 且 Pinata 返回 CID 后出现。回执包含 `ipfs://<CID>` 和网关 URL。 |
+
+Pinata 未配置或上传失败时，系统保留 SHA-256 和可下载 JSON，并明确显示 `local-sealed`。系统不会伪造 CID。
+
+纪念凭证是基于封存回执生成的可下载 JSON。同时可下载未来 NFT-ready metadata，但当前版本不连接钱包、不发起链上交易，也不铸造 NFT。
+
+## 证据与隐私边界
+
+- 可封存的证据只包含公开、简短、事实性的摘要和来源元数据，例如来源标题、公开 URL 和检索时间。
+- 不将受版权保护的长文、私人内容或付费内容复制进档案。
+- 纪念册访客姓名和留言仅保留在本地会话中。封存档案只包含献花、点灯和留言条数等聚合计数。
+
+## 本地配置
+
+本地流程使用 Python 3.9 或更高版本，Render 配置固定为 Python 3.11.9。Node.js 只用于 JavaScript 和 Playwright 测试。在仓库根目录创建 `.env`，可使用下列占位值：
+
+```dotenv
+GONKA_API_KEY=replace_with_your_gonka_api_key
+GONKA_BASE_URL=https://api.gonkascan.com/v1
+GONKA_MODEL=auto
+GONKA_ARCHAEOLOGIST_MODEL=auto
+GONKA_VERIFIER_MODEL=auto
+GONKA_MODEL_PREFERENCE=MiniMaxAI/MiniMax-M2.7,moonshotai/Kimi-K2.6
+GONKA_TIMEOUT_SECONDS=35
+GONKA_MAX_TOKENS=180
+
+PINATA_JWT=replace_with_your_pinata_jwt
+PINATA_PIN_JSON_URL=https://api.pinata.cloud/pinning/pinJSONToIPFS
+PINATA_GATEWAY_URL=https://gateway.pinata.cloud/ipfs/
+
+HOST=127.0.0.1
+PORT=5177
 ```
 
-可选：如果要把墓碑 JSON 真实上传到 IPFS，继续设置：
+`PINATA_JWT` 是可选项。不配置时仍可完成本地封存、SHA-256 校验和凭证下载。不要提交 `.env`。
+
+安装测试依赖并启动服务：
 
 ```bash
-export PINATA_JWT="你的 Pinata JWT"
-export PINATA_GATEWAY_URL="https://gateway.pinata.cloud/ipfs/"
-```
-
-启动本地代理服务：
-
-```bash
+npm install
 python3 server.py
 ```
 
-然后打开：
+打开 `http://127.0.0.1:5177`。启动时会从 `.env` 读取配置，已存在的 shell 环境变量优先。未配置 `GONKA_API_KEY` 时，页面仍可以以 `DEMO FALLBACK` 完成演示。
 
-```text
-http://127.0.0.1:5177
+## 一键虾米流程
+
+1. 点击「进入公墓」。
+2. 在「调查控制台」点击「一键演示」。
+3. 流程自动选择虾米音乐，收集公开证据，并请求两个 Gonka 模型。
+4. 检查状态标签、模型名、Request ID、Truth Score、分数差和共识置信度。
+5. 流程自动封存当前验证 payload。未配置 Pinata 时应显示本地封存和 SHA-256，不应显示 CID。
+6. 生成并下载纪念凭证或 NFT-ready metadata。这些都是文件，不是链上铸造记录。
+
+## API 与状态端点
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| `GET` | `/api/status` | 返回 `gonka`、`ipfs` 和 `cache` 的能力状态，不返回密钥或 token |
+| `POST` | `/api/gonka/verify` | 接收案例、Wayback 摘要和公开证据包，返回标记了来源的验证结果 |
+| `POST` | `/api/archive/seal` | 计算规范化档案 SHA-256，并在可用时尝试 Pinata IPFS 上传 |
+
+状态检查：
+
+```bash
+curl -sS http://127.0.0.1:5177/api/status
 ```
 
-如果不设置 `GONKA_API_KEY`，服务会自动切到 mock fallback，页面仍然可以完整演示。
+预期键集是 `gonka`、`ipfs` 和 `cache`。状态端点只报告是否已配置，不暴露凭证值。
 
-## 3 分钟演示路径
+## 验证命令
 
-1. 点击开屏页的「进入公墓」，先展示左侧 Web2 遗址列表和右侧墓碑。
-2. 选择「虾米音乐」或「人人网」，展示 Truth Score、墓志铭、遗物清单和证据链。
-3. 切到「调查控制台」，展示 Gonka 专家会诊、Request ID 和 Agent 工作流。
-4. 切到「封存计划」，点击「生成账单」和「生成档案」。
-5. 展示 Kite 支付账本、档案就绪清单、SHA-256 内容哈希和永久档案 JSON。
-6. 回到墓碑详情，认领纪念 NFT，说明它可以升级成 SBT 或测试网合约。
+从仓库根目录运行完整套件：
 
-## API 接入
-
-前端调用两个本地接口：
-
-```text
-POST /api/gonka/verify
-POST /api/archive/seal
+```bash
+python3 -m unittest tests/test_cemetery_core.py tests/test_server.py -v
+node --test tests/core.test.cjs
+python3 -m py_compile server.py cemetery_core.py verification_cache.py
+node --check core.js
+node --check app.js
+npm run test:browser
 ```
 
-本地服务端再分别转发到：
+Playwright 使用隔离的 Chromium，分别在桌面和移动端运行 6 个流程测试，共 12 个测试。
 
-```text
-POST https://api.gonkascan.com/v1/chat/completions
-POST https://api.pinata.cloud/pinning/pinJSONToIPFS
-```
+## Render 部署配置
 
-这样 Gonka API Key 和 Pinata JWT 都不会暴露在浏览器里。
+`render.yaml` 定义了一个 Python Web Service：
 
-## 下一步接入
+- 构建命令：`python3 -m py_compile server.py cemetery_core.py verification_cache.py`
+- 启动命令：`python3 server.py`
+- 健康检查：`/api/status`
+- 宿主绑定：`HOST=0.0.0.0`
+- Python 版本：`3.11.9`
+- 必需秘密环境变量：`GONKA_API_KEY`
+- 可选秘密环境变量：`PINATA_JWT`
 
-1. 从 dashboard 确认最终使用的模型池。当前支持 `auto` 模式，会从 `/models` 自动发现模型并选择两个不同模型做会诊。实测 `moonshotai/Kimi-K2.6` 可返回真实 Request ID，`MiniMaxAI/MiniMax-M2.7` 偶发 429，系统会记录失败原因并保留可用模型结果。
-2. 补强虾米音乐的公开证据截图和演示解说词。
-3. 录制一条虾米音乐完整 Demo：Gonka 会诊，生成墓志铭，封存 JSON，展示 CID。
-4. 接入 Kite Agent Passport，用授权额度真实支付永久安葬费。
-5. 将纪念 NFT 从前端 metadata 演示升级为测试网合约或 SBT。
+在 Render 创建 Blueprint 后，需要在服务设置中填入秘密值。本仓库不包含公开部署凭证或已部署 URL，因此提交清单中的公开 URL 项保持未勾选。
+
+## 故障排查
+
+- `/api/status` 的 `gonka` 为 `demo_fallback`：检查 `.env` 中是否配置 `GONKA_API_KEY`，然后重启服务。
+- 页面显示 `CACHED LIVE`：当前 Gonka 请求失败，系统恢复了之前的实时共识缓存。这不是当前实时验证。
+- 页面显示 `PARTIAL`：只有一个模型成功，检查模型可用性、超时和 Router 响应。
+- 档案显示 `local-sealed`：当前没有可用的 Pinata CID。配置 `PINATA_JWT` 后重新封存，或继续使用本地 JSON 和 SHA-256 进行演示。
+- 端口被占用：使用其他端口启动，例如 `PORT=5180 python3 server.py`。
+- Playwright 缺少浏览器：运行 `npx playwright install chromium`。
+- Pinata 返回错误或缺少 CID：档案会降级为 `local-sealed`，不会构造 CID。
+
+## 明确排除的功能
+
+- 钱包连接。
+- 付费、付款授权和支付账本。
+- 链上 NFT 铸造。当前仅生成可下载纪念凭证和未来兼容 metadata。
+- 演示视频录制。
+
+提交前状态见 [`docs/SUBMISSION_CHECKLIST.md`](docs/SUBMISSION_CHECKLIST.md)。

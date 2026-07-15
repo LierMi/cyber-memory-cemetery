@@ -871,12 +871,13 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
+    host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "5177"))
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"Cyber Memory Cemetery running at http://127.0.0.1:{port}")
+    http_server = ThreadingHTTPServer((host, port), Handler)
+    print(f"Cyber Memory Cemetery running at http://{host}:{port}")
     print(f"Gonka base URL: {GONKA_BASE_URL}")
-    print("Gonka mode:", "live" if GONKA_API_KEY else "mock fallback")
-    server.serve_forever()
+    print("Gonka mode:", "live" if GONKA_API_KEY else "demo fallback")
+    http_server.serve_forever()
 
 
 if __name__ == "__main__":
