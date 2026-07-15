@@ -1,5 +1,4 @@
 import json
-import hashlib
 import os
 import re
 import time
@@ -8,7 +7,13 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-from cemetery_core import aggregate_consensus, cache_key, normalize_score
+from cemetery_core import (
+    aggregate_consensus,
+    archive_eligibility,
+    cache_key,
+    content_hash,
+    normalize_score,
+)
 from verification_cache import VerificationCache
 
 
@@ -98,10 +103,6 @@ def canonical_json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2)
 
 
-def sha256_hex(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
 def archive_filename(payload, content_hash):
     case = payload.get("case") or {}
     case_id = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(case.get("id") or "memorial")).strip("-")
@@ -113,9 +114,8 @@ def gateway_url(cid):
     return base + cid
 
 
-def upload_pinata_json(sealed_payload, filename, content_hash):
-    archive = sealed_payload.get("archive") or {}
-    case = archive.get("case") or {}
+def upload_pinata_json(payload, filename, content_hash_value):
+    case = payload.get("case") or {}
     body = {
         "pinataOptions": {"cidVersion": 1},
         "pinataMetadata": {
@@ -123,10 +123,10 @@ def upload_pinata_json(sealed_payload, filename, content_hash):
             "keyvalues": {
                 "app": "cyber-memory-cemetery",
                 "caseId": str(case.get("id") or "unknown"),
-                "contentHash": content_hash,
+                "contentHash": content_hash_value,
             },
         },
-        "pinataContent": sealed_payload,
+        "pinataContent": payload,
     }
     return request_json(PINATA_PIN_JSON_URL, method="POST", body=body, bearer_token=PINATA_JWT)
 
@@ -136,63 +136,72 @@ def seal_archive(request_payload):
     if not isinstance(payload, dict) or not payload:
         raise ValueError("Missing archive payload")
 
-    archive_json = canonical_json(payload)
-    content_hash = sha256_hex(archive_json)
-    content_hash_id = f"sha256:{content_hash}"
-    filename = request_payload.get("filename") or archive_filename(payload, content_hash)
+    content_hash_value = content_hash(payload)
+    content_digest = content_hash_value.split(":", 1)[1]
+    filename = request_payload.get("filename") or archive_filename(payload, content_digest)
     sealed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    provider = "pinata-ipfs" if PINATA_JWT else "demo-local"
-    status = "upload-requested" if PINATA_JWT else "sealed-demo"
+    verification = payload.get("verification") or {}
+    verification_state = verification.get("verificationState", "demo_fallback")
+    eligibility = archive_eligibility(verification_state)
+    request_ids = [
+        request.get("requestId")
+        for request in verification.get("requests", [])
+        if isinstance(request, dict) and request.get("requestId")
+    ]
+    local_id = f"local://sha256/{content_digest}"
+    provider = "local-sealed"
+    status = "sealed-local"
     notes = []
-    sealed_payload = {
-        "schema": "cyber-memory-cemetery/sealed/v0.1",
-        "archive": payload,
-        "receipt": {
-            "provider": provider,
-            "status": status,
-            "contentHash": content_hash_id,
-            "sealedAt": sealed_at,
-        },
-    }
-
-    archive_id = f"ar://demo/{content_hash[:32]}"
+    archive_id = local_id
     gateway = ""
 
     if PINATA_JWT:
         try:
-            result = upload_pinata_json(sealed_payload, filename, content_hash_id)
+            result = upload_pinata_json(payload, filename, content_hash_value)
             cid = result.get("IpfsHash") or result.get("cid")
             if cid:
                 archive_id = f"ipfs://{cid}"
                 gateway = gateway_url(cid)
+                provider = "pinata-ipfs"
                 status = "uploaded"
             else:
                 status = "pinata-response-missing-cid"
                 notes.append("Pinata 已响应，但未返回 CID。")
         except Exception as error:
-            provider = "demo-local"
-            status = "sealed-demo-fallback"
-            archive_id = f"ar://demo/{content_hash[:32]}"
-            notes.append(f"Pinata 上传失败，已切换本地演示封存：{error}")
+            status = "sealed-local-fallback"
+            notes.append(f"Pinata 上传失败，已切换本地封存：{error}")
 
-    sealed_payload["receipt"]["provider"] = provider
-    sealed_payload["receipt"]["status"] = status
-    sealed_payload["receipt"]["archiveId"] = archive_id
+    receipt = {
+        "provider": provider,
+        "status": status,
+        "contentHash": content_hash_value,
+        "archiveId": archive_id,
+        "sealedAt": sealed_at,
+        "sealEligibility": eligibility,
+    }
     if gateway:
-        sealed_payload["receipt"]["gatewayUrl"] = gateway
+        receipt["gatewayUrl"] = gateway
     if notes:
-        sealed_payload["receipt"]["notes"] = notes
+        receipt["notes"] = notes
+
+    sealed_payload = {
+        "schema": "cyber-memory-cemetery/sealed/v0.1",
+        "archive": payload,
+        "receipt": receipt,
+    }
 
     sealed_json = canonical_json(sealed_payload)
     case = payload.get("case") or {}
-    verification = payload.get("verification") or {}
     preview = {
         "id": case.get("id"),
         "url": case.get("originalUrl"),
         "truthScore": verification.get("truthScore"),
+        "contentCreatedAt": payload.get("contentCreatedAt"),
+        "verificationState": verification_state,
+        "requestIds": request_ids,
         "provider": provider,
         "status": status,
-        "contentHash": content_hash_id,
+        "contentHash": content_hash_value,
         "archiveId": archive_id,
     }
     if gateway:
@@ -201,9 +210,14 @@ def seal_archive(request_payload):
     return {
         "provider": provider,
         "status": status,
-        "contentHash": content_hash_id,
+        "contentHash": content_hash_value,
         "archiveId": archive_id,
         "gatewayUrl": gateway,
+        "sealEligibility": eligibility,
+        "contentCreatedAt": payload.get("contentCreatedAt"),
+        "verificationState": verification_state,
+        "truthScore": verification.get("truthScore"),
+        "requestIds": request_ids,
         "filename": filename,
         "json": sealed_json,
         "previewJson": json.dumps(preview, ensure_ascii=False, indent=2),
@@ -779,6 +793,19 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def do_GET(self):
+        if self.path == "/api/status":
+            self.send_json(
+                200,
+                {
+                    "gonka": "live" if GONKA_API_KEY else "demo_fallback",
+                    "ipfs": "configured" if PINATA_JWT else "local_only",
+                    "cache": "enabled",
+                },
+            )
+            return
+        super().do_GET()
 
     def do_POST(self):
         if self.path == "/api/archive/seal":

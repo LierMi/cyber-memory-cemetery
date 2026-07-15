@@ -44,6 +44,12 @@ class CemeteryCoreTests(unittest.TestCase):
         self.assertEqual(result["verificationState"], "partial")
         self.assertEqual(archive_eligibility(result["verificationState"]), "draft")
 
+    def test_only_live_receipts_are_verified_for_archive_sealing(self):
+        self.assertEqual(archive_eligibility("live_consensus"), "verified")
+        self.assertEqual(archive_eligibility("cached_live"), "verified")
+        self.assertEqual(archive_eligibility("partial"), "draft")
+        self.assertEqual(archive_eligibility("demo_fallback"), "draft")
+
     def test_hash_and_cache_key_are_deterministic(self):
         payload = {"case": {"id": "xiami"}, "score": 87}
         self.assertEqual(content_hash(payload), content_hash(payload))

@@ -3,11 +3,107 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import server
 from server import build_council_prompt, format_evidence_package, normalize_evidence_package
 from verification_cache import VerificationCache
+
+
+class ArchiveSealTests(unittest.TestCase):
+    def archive_payload(self, verification_state="live_consensus"):
+        return {
+            "case": {"id": "xiami"},
+            "contentCreatedAt": "2026-07-15T12:00:00Z",
+            "verification": {
+                "verificationState": verification_state,
+                "truthScore": 87,
+                "requests": [{"requestId": "gonka-a"}, {"requestId": "gonka-b"}],
+            },
+        }
+
+    def test_retry_keeps_the_same_content_hash(self):
+        payload = {
+            "case": {"id": "xiami"},
+            "contentCreatedAt": "2026-07-15T12:00:00Z",
+            "verification": {"verificationState": "live_consensus"},
+        }
+        with patch.object(server, "PINATA_JWT", ""):
+            first = server.seal_archive({"payload": payload})
+            second = server.seal_archive({"payload": payload})
+
+        self.assertEqual(first["contentHash"], second["contentHash"])
+
+    def test_mock_archive_is_a_draft(self):
+        payload = {
+            "case": {"id": "xiami"},
+            "contentCreatedAt": "2026-07-15T12:00:00Z",
+            "verification": {"verificationState": "demo_fallback"},
+        }
+        with patch.object(server, "PINATA_JWT", ""):
+            result = server.seal_archive({"payload": payload})
+
+        self.assertEqual(result["sealEligibility"], "draft")
+
+    def test_local_receipt_uses_frozen_payload_metadata_and_local_id(self):
+        payload = self.archive_payload()
+        with patch.object(server, "PINATA_JWT", ""):
+            result = server.seal_archive({"payload": payload})
+
+        digest = result["contentHash"].split(":", 1)[1]
+        self.assertEqual(result["provider"], "local-sealed")
+        self.assertEqual(result["archiveId"], f"local://sha256/{digest}")
+        self.assertEqual(result["contentCreatedAt"], payload["contentCreatedAt"])
+        self.assertEqual(result["verificationState"], "live_consensus")
+        self.assertEqual(result["truthScore"], 87)
+        self.assertEqual(result["requestIds"], ["gonka-a", "gonka-b"])
+
+    def test_pinata_uploads_only_the_frozen_payload(self):
+        payload = self.archive_payload()
+        with patch.object(server, "PINATA_JWT", "test-jwt"), patch.object(
+            server, "upload_pinata_json", return_value={"IpfsHash": "bafy-test"}
+        ) as upload:
+            result = server.seal_archive({"payload": payload})
+
+        uploaded_payload = upload.call_args.args[0]
+        self.assertEqual(uploaded_payload, payload)
+        self.assertNotIn("receipt", uploaded_payload)
+        self.assertEqual(result["provider"], "pinata-ipfs")
+        self.assertEqual(result["archiveId"], "ipfs://bafy-test")
+
+    def test_failed_pinata_upload_returns_a_retryable_local_receipt(self):
+        payload = self.archive_payload()
+        with patch.object(server, "PINATA_JWT", "test-jwt"), patch.object(
+            server, "upload_pinata_json", side_effect=RuntimeError("offline")
+        ):
+            result = server.seal_archive({"payload": payload})
+
+        self.assertEqual(result["provider"], "local-sealed")
+        self.assertTrue(result["archiveId"].startswith("local://sha256/"))
+        self.assertNotIn("ar://demo", result["archiveId"])
+
+    def test_status_endpoint_reports_service_state_without_secrets(self):
+        handler = object.__new__(server.Handler)
+        handler.path = "/api/status"
+        handler.send_json = Mock()
+        with patch.object(server, "GONKA_API_KEY", "gonka-secret"), patch.object(
+            server, "PINATA_JWT", "pinata-secret"
+        ):
+            handler.do_GET()
+
+        response = handler.send_json.call_args.args[1]
+        self.assertEqual(response, {"gonka": "live", "ipfs": "configured", "cache": "enabled"})
+        self.assertNotIn("gonka-secret", str(response))
+        self.assertNotIn("pinata-secret", str(response))
+
+    def test_browser_fallback_uses_the_frozen_payload_canonical_hash(self):
+        source = Path("app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function canonicalArchiveJson(value)", source)
+        self.assertIn("const canonical = canonicalArchiveJson(basePayload);", source)
+        self.assertIn('"local-sealed": "本地封存，不具备永久存储证明"', source)
+        self.assertNotIn('provider: "demo-local"', source)
+        self.assertNotIn("ar://demo", source)
 
 
 class VerificationCacheTests(unittest.TestCase):

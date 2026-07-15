@@ -404,9 +404,15 @@ const state = {
   running: false,
   currentMemorial: null,
   archiveSeals: {},
+  archivePayloads: {},
   memorialActions: {},
   nftClaims: {},
   invoices: {},
+};
+
+const archiveProviderCopy = {
+  "pinata-ipfs": "IPFS 永久档案",
+  "local-sealed": "本地封存，不具备永久存储证明",
 };
 
 const byId = (id) => document.getElementById(id);
@@ -1298,7 +1304,7 @@ function renderArchiveWorkbench(item, archiveSeal) {
   const actions = getActions(item.id);
   const claim = state.nftClaims[item.id];
   const invoice = state.invoices[item.id];
-  const provider = archiveSeal?.provider === "pinata-ipfs" ? "IPFS" : archiveSeal ? "demo-local" : "pending";
+  const provider = archiveSeal ? archiveProviderCopy[archiveSeal.provider] || archiveSeal.provider : "pending";
 
   target.innerHTML = `
     <div class="archive-workbench-grid">
@@ -1331,7 +1337,7 @@ function renderArchiveWorkbench(item, archiveSeal) {
         <strong>${escapeHtml(provider)}</strong>
         <p>${archiveSeal ? escapeHtml(archiveSeal.archiveId) : "封存后返回内容哈希和存储 ID。"}</p>
         <button class="button primary" type="button" data-action="seal-archive">
-          生成档案
+          ${archiveSeal?.provider === "local-sealed" ? "重新上传 IPFS" : "生成档案"}
         </button>
       </article>
     </div>
@@ -1397,6 +1403,10 @@ function stableJson(value) {
   return JSON.stringify(sortKeys(value), null, 2);
 }
 
+function canonicalArchiveJson(value) {
+  return JSON.stringify(sortKeys(value));
+}
+
 async function sha256Hex(text) {
   if (!globalThis.crypto?.subtle) {
     let fallback = "";
@@ -1438,7 +1448,7 @@ function buildArchivePayload(item, liveArchive, verification) {
 
   return {
     schema: "cyber-memory-cemetery/v0.1",
-    generatedAt: new Date().toISOString(),
+    contentCreatedAt: new Date().toISOString(),
     project: "赛博记忆公墓",
     case: {
       id: item.id,
@@ -1495,12 +1505,13 @@ function buildArchivePayload(item, liveArchive, verification) {
     },
     verification: {
       source: verificationSource,
+      verificationState: verification?.verificationState || "demo_fallback",
       truthScore: verification?.truthScore || item.truthScore,
       requests: verification?.requests || item.requests.map(normalizePresetRequest),
       notes: verification?.notes || [],
     },
     storage: {
-      provider: "demo-local",
+      provider: "pending",
       status: "ready-to-upload",
     },
   };
@@ -1508,11 +1519,7 @@ function buildArchivePayload(item, liveArchive, verification) {
 
 function renderArchivePanel(item, archiveSeal) {
   const providerLabel =
-    archiveSeal?.provider === "pinata-ipfs"
-      ? "真实 IPFS"
-      : archiveSeal?.provider === "demo-local"
-        ? "本地演示"
-        : "待封存";
+    archiveSeal ? archiveProviderCopy[archiveSeal.provider] || archiveSeal.provider : "待封存";
   return `
     <div class="detail-section archive-panel">
       <h4>永久档案封存</h4>
@@ -1521,7 +1528,7 @@ function renderArchivePanel(item, archiveSeal) {
       </p>
       <div class="archive-actions">
         <button class="button primary" type="button" data-action="seal-archive">
-          生成永久档案
+          ${archiveSeal?.provider === "local-sealed" ? "重新上传 IPFS" : "生成永久档案"}
         </button>
         ${
           archiveSeal
@@ -1716,7 +1723,9 @@ async function sealCurrentArchive() {
 
   const { item, liveArchive, verification } = current;
   setAgentState("封存中");
-  const basePayload = buildArchivePayload(item, liveArchive, verification);
+  const basePayload =
+    state.archivePayloads[item.id] || buildArchivePayload(item, liveArchive, verification);
+  state.archivePayloads[item.id] = basePayload;
 
   try {
     const response = await fetch("/api/archive/seal", {
@@ -1734,28 +1743,37 @@ async function sealCurrentArchive() {
     }
     state.archiveSeals[item.id] = seal;
   } catch (error) {
-    const canonical = stableJson(basePayload);
+    const canonical = canonicalArchiveJson(basePayload);
     const hash = await sha256Hex(canonical);
     const contentHash = `sha256:${hash}`;
-    const archiveId = `ar://demo/${hash.slice(0, 32)}`;
+    const archiveId = `local://sha256/${hash}`;
     const filename = `cyber-memory-${item.id}-${hash.slice(0, 10)}.json`;
     const fallbackRecord = {
       schema: "cyber-memory-cemetery/sealed/v0.1",
       archive: basePayload,
       receipt: {
-        provider: "demo-local",
+        provider: "local-sealed",
         status: "browser-fallback",
         contentHash,
         archiveId,
         sealedAt: new Date().toISOString(),
+        sealEligibility:
+          basePayload.verification.verificationState === "live_consensus" ||
+          basePayload.verification.verificationState === "cached_live"
+            ? "verified"
+            : "draft",
         notes: [`服务端封存失败，已使用浏览器本地封存：${error.message}`],
       },
     };
     state.archiveSeals[item.id] = {
-      provider: "demo-local",
+      provider: "local-sealed",
       status: "browser-fallback",
       archiveId,
       contentHash,
+      contentCreatedAt: basePayload.contentCreatedAt,
+      verificationState: basePayload.verification.verificationState,
+      truthScore: basePayload.verification.truthScore,
+      requestIds: basePayload.verification.requests.map((request) => request.requestId).filter(Boolean),
       filename,
       json: stableJson(fallbackRecord),
       previewJson: JSON.stringify(
@@ -1763,7 +1781,7 @@ async function sealCurrentArchive() {
           id: item.id,
           url: item.originalUrl,
           truthScore: basePayload.verification.truthScore,
-          provider: "demo-local",
+          provider: "local-sealed",
           status: "browser-fallback",
           contentHash,
           archiveId,
@@ -1807,6 +1825,7 @@ function refreshCurrentMemorial() {
 
 function invalidateArchive(caseId) {
   delete state.archiveSeals[caseId];
+  delete state.archivePayloads[caseId];
 }
 
 function addFlower() {
@@ -2014,7 +2033,7 @@ async function runAnalysis(event) {
   state.running = true;
   const item = cases.find((entry) => entry.id === byId("caseSelect").value) || cases[0];
   const inputUrl = byId("urlInput").value;
-  delete state.archiveSeals[item.id];
+  invalidateArchive(item.id);
   setAgentState("运行中");
 
   let liveArchive = null;
