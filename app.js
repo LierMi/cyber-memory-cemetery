@@ -1479,8 +1479,15 @@ function setDemoInteractionLock(element, locked) {
   }
 }
 
+function isDemoMutationLocked() {
+  return Boolean(
+    state.running ||
+      (state.demo.status === "failed" && state.demoOperations[state.demo.step]),
+  );
+}
+
 function renderInteractionLocks() {
-  const locked = state.running;
+  const locked = isDemoMutationLocked();
   const controls = document.querySelectorAll([
     "#caseSelect",
     "#urlInput",
@@ -1507,7 +1514,7 @@ function renderInteractionLocks() {
 }
 
 async function sealCurrentArchive(allowWhileRunning = false) {
-  if (state.running && !allowWhileRunning) return false;
+  if (isDemoMutationLocked() && !allowWhileRunning) return false;
   const current = state.currentMemorial;
   if (!current) return false;
 
@@ -1578,7 +1585,7 @@ function invalidateArchive(caseId) {
 }
 
 function addFlower() {
-  if (state.running) return false;
+  if (isDemoMutationLocked()) return false;
   const current = state.currentMemorial;
   if (!current) return false;
   getActions(current.item.id).flowers += 1;
@@ -1589,7 +1596,7 @@ function addFlower() {
 }
 
 function lightCandle() {
-  if (state.running) return false;
+  if (isDemoMutationLocked()) return false;
   const current = state.currentMemorial;
   if (!current) return false;
   getActions(current.item.id).candles += 1;
@@ -1600,7 +1607,7 @@ function lightCandle() {
 }
 
 function submitGuestbook(form) {
-  if (state.running) return false;
+  if (isDemoMutationLocked()) return false;
   const current = state.currentMemorial;
   if (!current) return false;
   const data = new FormData(form);
@@ -1620,7 +1627,7 @@ function submitGuestbook(form) {
 }
 
 function generateMemorialCredential(allowWhileRunning = false) {
-  if (state.running && !allowWhileRunning) return false;
+  if (isDemoMutationLocked() && !allowWhileRunning) return false;
   const current = state.currentMemorial;
   if (!current) return false;
   const archiveSeal = state.archiveSeals[current.item.id];
@@ -1669,7 +1676,7 @@ function downloadCredentialMetadata() {
 }
 
 function selectCase(id, updateInput = true, allowWhileRunning = false) {
-  if (state.running && !allowWhileRunning) return false;
+  if (isDemoMutationLocked() && !allowWhileRunning) return false;
   const item = cases.find((entry) => entry.id === id) || cases[0];
   state.selectedId = item.id;
   byId("caseSelect").value = item.id;
@@ -1721,6 +1728,7 @@ function runDemoOperation(step, operation) {
   operationPromise.catch(() => {
     if (state.demoOperations[step] === operationPromise) {
       delete state.demoOperations[step];
+      renderInteractionLocks();
     }
   });
   return operationPromise;
@@ -1763,7 +1771,7 @@ function renderDemoProgress() {
     summary.textContent = "等待开始";
   }
   retryButton.hidden = state.demo.status !== "failed";
-  runButton.disabled = state.running;
+  runButton.disabled = isDemoMutationLocked();
   renderInteractionLocks();
 }
 
@@ -1925,7 +1933,7 @@ async function verifyWithGonka(item, liveArchive, evidencePackage) {
 
 async function runAnalysis(event) {
   event.preventDefault();
-  if (state.running) return;
+  if (isDemoMutationLocked()) return;
 
   state.running = true;
   renderInteractionLocks();

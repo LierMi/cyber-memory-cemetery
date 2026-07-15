@@ -290,9 +290,13 @@ test("running demo blocks manual case, seal, and credential mutation", async ({ 
   expect(archiveRequests).toBe(1);
 });
 
-test("retry re-awaits a timed-out archive request without duplicating it", async ({ page }) => {
+test("retained archive work keeps mutations locked until retry consumes it", async ({ page }) => {
   let gonkaRequests = 0;
   let archiveRequests = 0;
+  let releaseArchive;
+  const archiveGate = new Promise((resolve) => {
+    releaseArchive = resolve;
+  });
 
   await page.route("https://web.archive.org/cdx**", (route) => route.fulfill({ json: waybackRows }));
   await page.route("**/api/gonka/verify", async (route) => {
@@ -301,7 +305,7 @@ test("retry re-awaits a timed-out archive request without duplicating it", async
   });
   await page.route("**/api/archive/seal", async (route) => {
     archiveRequests += 1;
-    await new Promise((resolve) => setTimeout(resolve, 17000));
+    await archiveGate;
     await route.continue();
   });
 
@@ -311,8 +315,36 @@ test("retry re-awaits a timed-out archive request without duplicating it", async
   await expect(page.locator('[data-demo-step="4"]')).toHaveAttribute("data-status", "failed");
   expect(gonkaRequests).toBe(1);
   expect(archiveRequests).toBe(1);
+  await expect(page.getByRole("button", { name: "从失败步骤重试" })).toBeEnabled();
+  await expect(page.locator("#caseSelect")).toBeDisabled({ timeout: 2000 });
+  expect(
+    await page.locator([
+      "[data-action='seal-archive']",
+      "[data-action='generate-credential']",
+      "[data-action='offer-flower']",
+      "[data-action='light-candle']",
+      "[data-action='guestbook-submit'] button",
+      "[data-action='guestbook-submit'] input",
+      "[data-action='guestbook-submit'] textarea",
+    ].join(", ")).evaluateAll((controls) => controls.every((control) => control.disabled)),
+  ).toBeTruthy();
+
+  const beforeActions = await page.locator(".tribute-grid").innerText();
+  await page.evaluate(async () => {
+    window.selectCase("renren");
+    await window.sealCurrentArchive();
+    window.generateMemorialCredential();
+    window.addFlower();
+    window.lightCandle();
+    window.submitGuestbook(document.querySelector("[data-action='guestbook-submit']"));
+  });
+  await expect(page.locator("#caseSelect")).toHaveValue("xiami");
+  await expect(page.locator(".tribute-grid")).toHaveText(beforeActions);
+  await expect(page.getByRole("button", { name: "下载纪念凭证" })).toHaveCount(0);
+  expect(archiveRequests).toBe(1);
 
   await page.getByRole("button", { name: "从失败步骤重试" }).click();
+  releaseArchive();
   await expectDemoComplete(page);
   expect(gonkaRequests).toBe(1);
   expect(archiveRequests).toBe(1);
