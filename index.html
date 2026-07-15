@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="赛博记忆公墓是一个为消失 Web2 社区生成可验证链上墓碑的黑客松 Demo。"
+    />
+    <title>赛博记忆公墓 | Cyber Memory Cemetery</title>
+    <link rel="icon" href="./assets/noise.png" type="image/png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="pre-entry">
+    <div class="noise-layer" aria-hidden="true"></div>
+
+    <section id="entryScreen" class="entry-screen" aria-label="赛博记忆公墓开屏">
+      <div class="entry-bg" aria-hidden="true"></div>
+      <div class="entry-content">
+        <p class="entry-kicker">Dark Museum of Lost Web2 Communities</p>
+        <h1>Cyber Memory Cemetery</h1>
+        <p class="entry-title-cn">赛博记忆公墓</p>
+        <p class="entry-copy">
+          一个由 AI Agent 策展的 Web2 数字遗产公墓。验真、立碑、纪念、封存。
+        </p>
+        <div class="entry-actions">
+          <button class="button primary" type="button" data-entry-action="enter">
+            进入公墓
+          </button>
+          <button class="button secondary" type="button" data-entry-action="lab">
+            启动建碑
+          </button>
+        </div>
+      </div>
+      <div class="entry-ledger" aria-label="当前演示状态">
+        <div>
+          <strong>5</strong>
+          <span>Memory Exhibits</span>
+        </div>
+        <div>
+          <strong>Gonka</strong>
+          <span>Model Council</span>
+        </div>
+        <div>
+          <strong>JSON</strong>
+          <span>Permanent Archive</span>
+        </div>
+        <div>
+          <strong>NFT</strong>
+          <span>Witness Badge</span>
+        </div>
+      </div>
+    </section>
+
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="赛博记忆公墓首页">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Cyber Memory Cemetery</span>
+        <em>赛博记忆公墓</em>
+      </a>
+      <nav class="nav-links" aria-label="主导航">
+        <a href="#cases">案例</a>
+        <a href="#memorial" data-museum-tab="exhibit">墓碑</a>
+        <a href="#lab" data-museum-tab="console">建碑</a>
+        <a href="#roadmap" data-museum-tab="archive">封存</a>
+      </nav>
+    </header>
+
+    <main id="top" class="museum-shell">
+      <aside id="cases" class="cases museum-sidebar" aria-label="展品列表">
+        <div class="section-heading sidebar-heading">
+          <p class="kicker">Exhibits</p>
+          <h2>Web2 记忆遗址</h2>
+          <p>选择一个社区，右侧会切换成对应墓碑档案。</p>
+        </div>
+        <div id="caseGrid" class="case-grid" aria-live="polite"></div>
+      </aside>
+
+      <section class="museum-main" aria-label="墓碑档案">
+        <div class="museum-tabs" role="tablist" aria-label="档案视图">
+          <button class="museum-tab active" type="button" data-museum-tab="exhibit" role="tab">
+            展品详情
+          </button>
+          <button class="museum-tab" type="button" data-museum-tab="console" role="tab">
+            调查控制台
+            <span>AI</span>
+          </button>
+          <button class="museum-tab" type="button" data-museum-tab="archive" role="tab">
+            封存计划
+          </button>
+        </div>
+
+        <div class="tab-panel active" data-tab-panel="exhibit">
+          <section class="hero museum-intro">
+            <div class="hero-copy">
+              <p class="kicker">Gonka Truth Engine for Lost Web2 Communities</p>
+              <h1>逛一座链上公墓，吊唁死去的 Web2 社区。</h1>
+              <p class="hero-text">
+                Agent 搜索网页残骸，交叉验真，再生成可审计的数字墓碑。
+              </p>
+              <div class="hero-actions">
+                <button class="button primary" type="button" data-museum-tab="console">
+                  开始建碑
+                </button>
+                <button class="button secondary" type="button" data-action="seal-archive">
+                  生成档案
+                </button>
+              </div>
+            </div>
+
+            <figure class="hero-visual">
+              <img
+                src="./assets/memory-cemetery.png"
+                alt="一个由旧网页窗口和电子墓碑构成的赛博公墓"
+                width="960"
+                height="720"
+              />
+              <figcaption>
+                Truth Score / Gonka Request ID / Permanent Archive
+              </figcaption>
+            </figure>
+          </section>
+
+          <section id="memorial" class="memorial">
+            <div class="section-heading compact">
+              <p class="kicker">Current Exhibit</p>
+              <h2>当前墓碑</h2>
+              <p>所有文学化内容都绑定证据链。事实字段不够确定时，系统会降分并标注不确定性。</p>
+            </div>
+            <article id="memorialDetail" class="memorial-card"></article>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="console" hidden>
+          <section id="lab" class="lab">
+            <div class="section-heading compact">
+              <p class="kicker">Agent Console</p>
+              <h2>建一座新的墓碑</h2>
+              <p>选择案例或输入消失网站 URL。Agent 会查询快照、整理证据并请求 Gonka 会诊。</p>
+            </div>
+            <div class="lab-panel">
+              <div class="lab-form">
+                <form id="analysisForm">
+                  <label for="caseSelect">选择案例</label>
+                  <select id="caseSelect" name="caseSelect"></select>
+
+                  <label for="urlInput">遗址 URL 或关键词</label>
+                  <input
+                    id="urlInput"
+                    name="urlInput"
+                    type="text"
+                    value="https://www.xiami.com"
+                    autocomplete="url"
+                  />
+                  <p class="helper-text">
+                    推荐跑 xiami.com；备用：renren.com、blog.163.com、tianya.cn、mop.com
+                  </p>
+
+                  <button class="button primary full" type="submit">
+                    启动 Agent 考古
+                  </button>
+                </form>
+              </div>
+
+              <div class="workflow" aria-label="Agent 工作流">
+                <div class="workflow-head">
+                  <span>Agent 状态</span>
+                  <strong id="agentState">待启动</strong>
+                </div>
+                <ol id="stepList" class="step-list"></ol>
+              </div>
+            </div>
+            <div id="consoleDetail" class="console-detail" aria-live="polite"></div>
+          </section>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="archive" hidden>
+          <section id="roadmap" class="roadmap">
+            <div class="roadmap-copy">
+              <p class="kicker">Archive Plan</p>
+              <h2>封存与商业闭环</h2>
+              <p>
+                第一版让评委看到完整闭环：Gonka 验真、纪念 NFT、安葬账单、永久档案。
+              </p>
+            </div>
+
+            <section class="stats-strip" aria-label="产品核心指标">
+              <div>
+                <strong>5</strong>
+                <span>候选记忆案例</span>
+              </div>
+              <div>
+                <strong>2+</strong>
+                <span>多模型交叉验证</span>
+              </div>
+              <div>
+                <strong>0-100</strong>
+                <span>Truth Score</span>
+              </div>
+              <div>
+                <strong>NFT</strong>
+                <span>可认领凭证</span>
+              </div>
+            </section>
+
+            <div id="archiveWorkbench" class="archive-workbench" aria-live="polite"></div>
+
+            <section class="demo-script-panel" aria-label="演示讲述顺序">
+              <div>
+                <span>01</span>
+                <strong>输入遗址</strong>
+                <p>选择人人网或虾米音乐，让 Agent 接收一个正在消失的 Web2 社区。</p>
+              </div>
+              <div>
+                <span>02</span>
+                <strong>专家会诊</strong>
+                <p>Gonka 两个模型分别扮演数字考古员和真相校验员，输出 Truth Score。</p>
+              </div>
+              <div>
+                <span>03</span>
+                <strong>链上安葬</strong>
+                <p>生成档案哈希、纪念 NFT 和 Kite 账单，形成可付费的产品闭环。</p>
+              </div>
+            </section>
+
+            <div class="roadmap-grid">
+              <div>
+                <strong>Day 1</strong>
+                <span>前端骨架、案例数据、墓碑页、Wayback 查询兜底。</span>
+              </div>
+              <div>
+                <strong>Day 2</strong>
+                <span>接 Gonka Router，多模型验证，Truth Score 和 Request ID。</span>
+              </div>
+              <div>
+                <strong>Day 3</strong>
+                <span>永久档案、纪念 NFT、安葬账单、Demo 视频和 README。</span>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer section-shell">
+      <p>赛博记忆公墓保存的不是网页，而是人类曾经在互联网上活过的证据。</p>
+      <button class="footer-link" type="button" data-museum-tab="exhibit">
+        回到档案
+      </button>
+    </footer>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
