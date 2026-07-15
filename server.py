@@ -41,6 +41,10 @@ PINATA_PIN_JSON_URL = os.getenv(
 )
 PINATA_GATEWAY_URL = os.getenv("PINATA_GATEWAY_URL", "https://gateway.pinata.cloud/ipfs/")
 MODEL_CACHE = None
+MAX_EVIDENCE_CLAIMS = 12
+MAX_EVIDENCE_CLAIM_LENGTH = 500
+MAX_EVIDENCE_SOURCE_TITLE_LENGTH = 200
+MAX_EVIDENCE_SOURCE_URL_LENGTH = 2048
 
 
 def clamp_score(value, fallback):
@@ -384,8 +388,62 @@ def bullet_lines(items):
     return "\n".join([f"- {item}" for item in items])
 
 
+def has_control_characters(value):
+    return any(ord(character) < 32 or ord(character) == 127 for character in value)
+
+
+def normalize_evidence_package(evidence_package):
+    if not isinstance(evidence_package, dict):
+        return {"claims": []}
+
+    raw_claims = evidence_package.get("claims")
+    if not isinstance(raw_claims, list):
+        return {"claims": []}
+
+    claims = []
+    for item in raw_claims[:MAX_EVIDENCE_CLAIMS]:
+        if not isinstance(item, dict) or item.get("publicArchiveAllowed") is not True:
+            continue
+
+        claim = item.get("claim")
+        source_title = item.get("sourceTitle")
+        source_url = item.get("sourceUrl")
+        if not all(isinstance(value, str) for value in (claim, source_title, source_url)):
+            continue
+
+        claim = claim.strip()
+        source_title = source_title.strip()
+        source_url = source_url.strip()
+        if (
+            not claim
+            or not source_title
+            or not source_url.startswith("https://")
+            or len(claim) > MAX_EVIDENCE_CLAIM_LENGTH
+            or len(source_title) > MAX_EVIDENCE_SOURCE_TITLE_LENGTH
+            or len(source_url) > MAX_EVIDENCE_SOURCE_URL_LENGTH
+            or any(has_control_characters(value) for value in (claim, source_title, source_url))
+        ):
+            continue
+
+        confidence = item.get("confidence")
+        claims.append(
+            {
+                "claim": claim,
+                "sourceTitle": source_title,
+                "sourceUrl": source_url,
+                "confidence": (
+                    confidence
+                    if isinstance(confidence, str) and confidence in {"primary", "secondary", "context"}
+                    else "context"
+                ),
+            }
+        )
+
+    return {"claims": claims}
+
+
 def format_evidence_package(evidence_package):
-    claims = (evidence_package or {}).get("claims") or []
+    claims = normalize_evidence_package(evidence_package)["claims"]
     return "\n".join(
         f"- [{item.get('confidence')}] {item.get('claim')} 来源:{item.get('sourceUrl')}"
         for item in claims
@@ -601,6 +659,9 @@ def run_gonka_verification(payload):
     role_order = {"digital_archaeologist": 0, "truth_verifier": 1}
     requests.sort(key=lambda request: role_order.get(request.get("role"), 99))
     truth_score = aggregate_truth_score(requests, fallback_score)
+    all_fallback = bool(requests) and all(
+        (request.get("details") or {}).get("fallback") for request in requests
+    )
     notes.append("模型池：" + ", ".join(model_pool))
     for request in requests:
         details = request.get("details") or {}
@@ -609,7 +670,7 @@ def run_gonka_verification(payload):
                 notes.append(flag)
 
     return {
-        "source": "gonka",
+        "source": "mock" if all_fallback else "gonka",
         "truthScore": truth_score,
         "epitaph": case.get("epitaph", ""),
         "requests": requests,
