@@ -1311,7 +1311,7 @@ function renderArchiveWorkbench(item, archiveSeal) {
       <article>
         <span>Community Ledger</span>
         <strong>${actions.flowers} flowers / ${actions.candles} lights</strong>
-        <p>${actions.messages.length} 条纪念留言会写入永久档案。</p>
+        <p>永久档案仅记录献花、点灯和留言数量；留言内容仅保留在本地，不会上传。</p>
         <button class="button secondary" type="button" data-museum-tab="exhibit">
           去纪念册
         </button>

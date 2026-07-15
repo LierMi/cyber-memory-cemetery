@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { webcrypto } = require("node:crypto");
+const fs = require("node:fs");
 const core = require("../core.js");
 
 test("labels cached live results honestly", () => {
@@ -107,4 +108,12 @@ test("sha256Hex uses SubtleCrypto for the known SHA-256 vector", async () => {
 
 test("sha256Hex rejects when SubtleCrypto is unavailable", async () => {
   await assert.rejects(core.sha256Hex("abc", {}), /SubtleCrypto is unavailable/);
+});
+
+test("archive UI promises counts only and keeps message content local", () => {
+  const source = fs.readFileSync("app.js", "utf8");
+
+  assert.doesNotMatch(source, /条纪念留言会写入永久档案/);
+  assert.match(source, /永久档案仅记录/);
+  assert.match(source, /留言内容仅保留在本地，不会上传。/);
 });
