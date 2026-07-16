@@ -846,15 +846,16 @@ function archiveReadinessFor(item, archiveSeal, requests) {
   const evidenceCount = publicEvidenceClaims(item).length;
   const credential = state.credentials[item.id];
   const permanent = CemeteryCore.isPermanentArchiveReceipt(archiveSeal);
+  const liveConsensus = CemeteryCore.hasLiveModelConsensus(requests);
   const values = {
     公开证据: `${evidenceCount} 条公开摘要`,
-    模型会诊: `${requests.length} 个 Request ID`,
+    模型会诊: liveConsensus ? `${requests.length} 个真实且唯一的 Request ID` : "未达成实时双模型共识",
     永久封存: permanent ? archiveSeal.archiveId : archiveSeal ? "本地封存，待上传 IPFS" : "待上传 IPFS",
     纪念凭证: credential ? credential.id : "待生成",
   };
   return CemeteryCore.archiveReadiness({
     evidenceCount,
-    requestCount: requests.length,
+    requests,
     archiveSeal,
     credential,
   }).map((entry) => ({ ...entry, value: values[entry.label] }));
@@ -885,7 +886,7 @@ function renderTombstoneCraftPanel(item, archiveSeal) {
     {
       label: "纪念凭证",
       value: credentialText,
-      note: "由封存回执生成，当前仅标记为待链上认领。",
+      note: CemeteryCore.credentialStatusCopy(credential),
     },
     {
       label: "纪念热度",
@@ -933,7 +934,7 @@ function renderProofChainBoard(item, archiveSeal, requests, verificationSource) 
       label: "Gonka",
       value: `${requests.length} model requests`,
       note: verificationSource,
-      ready: requests.length > 0,
+      ready: CemeteryCore.hasLiveModelConsensus(requests),
     },
     {
       label: "Archive",
@@ -1441,8 +1442,8 @@ function renderMemorial(item, liveArchive, verification) {
           <span>快照取样</span>
         </div>
         <div>
-          <strong>${requests.length}</strong>
-          <span>模型共识</span>
+          <strong>${CemeteryCore.hasLiveModelConsensus(requests) ? "2" : "0"}</strong>
+          <span>实时模型共识</span>
         </div>
       </div>
       <div class="verification-summary-grid">
@@ -1554,8 +1555,9 @@ async function sealCurrentArchive(allowWhileRunning = false) {
   state.archivePayloads[item.id] = basePayload;
   const previousSeal = state.archiveSeals[item.id];
 
+  let response;
   try {
-    const response = await fetch("/api/archive/seal", {
+    response = await fetch("/api/archive/seal", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1565,17 +1567,24 @@ async function sealCurrentArchive(allowWhileRunning = false) {
         verificationReceipt: verification?.verificationReceipt,
       }),
     });
-    const seal = await response.json();
-    if (!response.ok) {
-      throw new Error(seal.message || seal.error || "Archive seal failed");
-    }
-    state.archiveSeals[item.id] = seal;
   } catch (error) {
     state.archiveSeals[item.id] = await CemeteryCore.createLocalArchiveSeal(basePayload, {
       cryptoProvider: globalThis.crypto,
       sealedAt: new Date().toISOString(),
       errorMessage: error.message,
     });
+  }
+
+  if (response) {
+    try {
+      state.archiveSeals[item.id] = await CemeteryCore.readArchiveSealResponse(response);
+    } catch (error) {
+      delete state.archiveSeals[item.id];
+      delete state.credentials[item.id];
+      renderMemorial(item, liveArchive, verification);
+      setAgentState(`封存被拒绝：${error.message}`);
+      throw error;
+    }
   }
 
   const nextSeal = state.archiveSeals[item.id];
@@ -2066,7 +2075,11 @@ function init() {
       downloadCredentialMetadata();
     }
     if (action === "seal-archive") {
-      await sealCurrentArchive();
+      try {
+        await sealCurrentArchive();
+      } catch (error) {
+        setAgentState(`封存被拒绝：${error.message}`);
+      }
     }
     if (action === "download-archive") {
       downloadCurrentArchive();

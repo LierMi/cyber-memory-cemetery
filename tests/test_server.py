@@ -646,6 +646,39 @@ class GonkaCouncilStateTests(unittest.TestCase):
                 self.assertTrue(normalized["fallback"])
                 self.assertIsNone(normalized["truthScore"])
 
+    def test_invalid_raw_scores_cannot_reach_live_consensus_or_cache(self):
+        payload = {
+            "case": {"id": "xiami", "truthScore": 86},
+            "evidencePackage": {"version": "2026-07-15.1", "claims": []},
+        }
+
+        for raw_score in (-1, 101, float("nan"), float("inf"), float("-inf")):
+            with self.subTest(raw_score=raw_score):
+                def council_response(role, model, _payload, _temperature):
+                    return {
+                        "role": role,
+                        "model": model,
+                        "requestId": f"request-{model}",
+                        "summary": "strict score probe",
+                        "details": {"truthScore": raw_score if model == "archaeologist" else 84},
+                    }
+
+                with patch.object(server, "GONKA_API_KEY", "test-key"), patch.object(
+                    server,
+                    "resolve_council_models",
+                    return_value=("archaeologist", "verifier", ["archaeologist", "verifier"]),
+                ), patch.object(
+                    server, "run_council_member", side_effect=council_response
+                ), patch.object(server.VERIFICATION_CACHE, "write") as write:
+                    result = server.run_gonka_verification(payload)
+
+                self.assertEqual(result["verificationState"], "partial")
+                self.assertEqual(result["sealEligibility"], "draft")
+                self.assertTrue(result["requests"][0]["fallback"])
+                self.assertIsNone(result["requests"][0]["truthScore"])
+                self.assertEqual(result["verificationRecord"]["verificationState"], "partial")
+                write.assert_not_called()
+
     def test_malformed_model_json_cannot_count_as_success(self):
         payload = {"case": {"id": "xiami", "truthScore": 86}}
         with patch.object(
@@ -872,8 +905,8 @@ class XiamiEvidenceTests(unittest.TestCase):
         with patch.object(server, "GONKA_API_KEY", "test-key"), patch.object(
             server, "resolve_council_models", return_value=("archaeologist", "verifier", [])
         ), patch.object(server, "run_council_member", side_effect=RuntimeError("forced failure")), patch.object(
-            server.VERIFICATION_CACHE, "latest_for_case", return_value=None
-        ):
+            server.VERIFICATION_CACHE, "latest_compatible", return_value=None
+        ) as latest_compatible:
             result = server.run_gonka_verification(payload)
 
         self.assertEqual(result["source"], "mock")
@@ -881,6 +914,7 @@ class XiamiEvidenceTests(unittest.TestCase):
         for request in result["requests"]:
             self.assertTrue(request["details"]["fallback"])
             self.assertTrue(request["requestId"].startswith("mock_gonka_"))
+        latest_compatible.assert_called_once()
 
     def test_council_prompts_include_formatted_evidence_claims(self):
         evidence_package = {

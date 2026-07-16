@@ -99,6 +99,31 @@
     );
   }
 
+  function successfulLiveRequests(requests) {
+    if (!Array.isArray(requests)) return [];
+    return requests.filter(
+      (request) =>
+        request &&
+        typeof request === "object" &&
+        !request.fallback &&
+        typeof request.model === "string" &&
+        request.model.length > 0 &&
+        realRequestId(request.requestId) &&
+        Number.isFinite(request.truthScore) &&
+        request.truthScore >= 0 &&
+        request.truthScore <= 100,
+    );
+  }
+
+  function hasLiveModelConsensus(requests) {
+    const successful = successfulLiveRequests(requests);
+    return (
+      successful.length >= 2 &&
+      new Set(successful.map((request) => request.model)).size >= 2 &&
+      new Set(successful.map((request) => request.requestId)).size >= 2
+    );
+  }
+
   function isValidVerificationResult(result) {
     if (!result || typeof result !== "object") return false;
     const state = result.verificationState;
@@ -124,19 +149,11 @@
     ) return false;
     if (!Array.isArray(result.requests)) return false;
 
-    const successful = result.requests.filter(
-      (request) =>
-        request &&
-        typeof request === "object" &&
-        !request.fallback &&
-        typeof request.model === "string" &&
-        request.model.length > 0 &&
-        realRequestId(request.requestId) &&
-        Number.isFinite(request.truthScore),
-    );
+    const successful = successfulLiveRequests(result.requests);
     const distinctModels = new Set(successful.map((request) => request.model));
+    const distinctRequestIds = new Set(successful.map((request) => request.requestId));
     if (state === "live_consensus" || state === "cached_live") {
-      return successful.length >= 2 && distinctModels.size >= 2;
+      return successful.length >= 2 && distinctModels.size >= 2 && distinctRequestIds.size >= 2;
     }
     if (state === "partial") return successful.length === 1;
     return (
@@ -173,6 +190,22 @@
       return data.fallback;
     }
     throw new Error(data?.message || data?.error || `Gonka HTTP ${response.status || "error"}`);
+  }
+
+  async function readArchiveSealResponse(response) {
+    let data;
+    try {
+      data = await response.json();
+    } catch (error) {
+      throw new Error("Archive seal response contained invalid JSON");
+    }
+    if (!response.ok) {
+      throw new Error(data?.message || data?.error || `Archive seal HTTP ${response.status || "error"}`);
+    }
+    if (!data || typeof data !== "object") {
+      throw new Error("Archive seal response was invalid");
+    }
+    return data;
   }
 
   function archiveCommunitySummary(actions) {
@@ -307,10 +340,13 @@
     );
   }
 
-  function archiveReadiness({ evidenceCount, requestCount, archiveSeal, credential }) {
+  function archiveReadiness({ evidenceCount, requestCount, requests, archiveSeal, credential }) {
+    const modelConsensusReady = Array.isArray(requests)
+      ? hasLiveModelConsensus(requests)
+      : requestCount >= 2;
     return [
       { label: "公开证据", ready: evidenceCount > 0 },
-      { label: "模型会诊", ready: requestCount >= 2 },
+      { label: "模型会诊", ready: modelConsensusReady },
       { label: "永久封存", ready: isPermanentArchiveReceipt(archiveSeal) },
       { label: "纪念凭证", ready: Boolean(credential) },
     ];
@@ -334,6 +370,8 @@
     createNftReadyMetadata,
     isValidVerificationResult,
     readVerificationResponse,
+    readArchiveSealResponse,
+    hasLiveModelConsensus,
     archiveCommunitySummary,
     sha256Hex,
     createLocalArchiveSeal,

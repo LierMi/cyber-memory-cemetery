@@ -468,6 +468,31 @@ test("network and invalid JSON verification failures stop the demo until retry",
   expect(attempts).toBe(3);
 });
 
+test("explicit archive rejection stops without creating a local seal", async ({ page }) => {
+  await page.route("**/api/archive/seal", (route) =>
+    route.fulfill({ status: 403, json: { error: "Verification receipt rejected" } }),
+  );
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+
+  await expect(page.locator('[data-demo-step="4"]')).toHaveAttribute("data-status", "failed");
+  await expect(page.locator("[data-demo-summary]")).toContainText(/receipt rejected/i);
+  await expect(page.locator(".archive-list")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "下载纪念凭证" })).toHaveCount(0);
+});
+
+test("archive transport failure alone creates the browser-local fallback", async ({ page }) => {
+  await page.route("**/api/archive/seal", (route) => route.abort("failed"));
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+
+  await expectDemoComplete(page);
+  await expect(page.locator(".archive-list")).toContainText("browser-fallback");
+  await expect(page.getByRole("button", { name: "下载纪念凭证" }).first()).toBeVisible();
+});
+
 test("zero Truth Score is preserved in the UI and frozen archive", async ({ page }) => {
   let archivedPayload;
   await page.route("**/api/gonka/verify", (route) =>

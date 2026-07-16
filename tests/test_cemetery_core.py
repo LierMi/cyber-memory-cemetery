@@ -86,6 +86,28 @@ class CemeteryCoreTests(unittest.TestCase):
         self.assertEqual(result["verificationState"], "partial")
         self.assertEqual(result["sealEligibility"], "draft")
 
+    def test_duplicate_successful_request_ids_cannot_create_live_consensus(self):
+        result = aggregate_consensus(
+            [
+                {
+                    "model": "model-a",
+                    "requestId": "request-shared",
+                    "truthScore": 90,
+                    "fallback": False,
+                },
+                {
+                    "model": "model-b",
+                    "requestId": "request-shared",
+                    "truthScore": 84,
+                    "fallback": False,
+                },
+            ],
+            evidence_completeness=92,
+        )
+
+        self.assertEqual(result["verificationState"], "partial")
+        self.assertEqual(result["sealEligibility"], "draft")
+
     def test_only_live_receipts_are_verified_for_archive_sealing(self):
         self.assertEqual(archive_eligibility("live_consensus"), "verified")
         self.assertEqual(archive_eligibility("cached_live"), "verified")

@@ -120,6 +120,24 @@ class VerificationTrustTests(unittest.TestCase):
         self.assertEqual(claims["truthScore"], 87)
         self.assertEqual(claims["verificationState"], "live_consensus")
 
+    def test_live_receipt_issuance_requires_two_unique_real_request_ids(self):
+        verification = copy.deepcopy(self.verification)
+        verification["requests"][1]["requestId"] = "request-a"
+        evidence = self.trust.prepare_evidence("xiami", self.evidence)
+
+        with self.assertRaisesRegex(ReceiptError, "Request IDs"):
+            self.trust.issue(verification, evidence)
+
+    def test_archive_verification_rejects_signed_duplicate_request_id_claims(self):
+        issued = self.issue()
+        request = self.archive_request(issued)
+        claims = self.trust._decode(request["verificationReceipt"])
+        claims["requests"][1]["requestId"] = "request-a"
+        request["verificationReceipt"] = self.trust._encode(claims)
+
+        with self.assertRaisesRegex(ReceiptError, "request claims"):
+            self.trust.verify_archive(request, max_bytes=500_000)
+
     def test_forged_expired_and_mismatched_receipts_are_rejected(self):
         issued = self.issue()
         valid_request = self.archive_request(issued)

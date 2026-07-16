@@ -10,11 +10,11 @@ def normalize_score(value, fallback):
         score = float(value)
     except (TypeError, ValueError):
         return fallback
-    if not math.isfinite(score):
+    if not math.isfinite(score) or score < 0 or score > 100:
         return fallback
     if 0 < score <= 10:
         score *= 10
-    return max(0, min(round(score), 100))
+    return round(score)
 
 
 def valid_live_request(request):
@@ -40,9 +40,16 @@ def valid_live_request(request):
 
 def aggregate_consensus(requests, evidence_completeness):
     requests_by_model = {}
+    request_ids = set()
     for request in requests:
-        if valid_live_request(request):
-            requests_by_model.setdefault(request["model"], request)
+        if not valid_live_request(request):
+            continue
+        model = request["model"]
+        request_id = request["requestId"]
+        if model in requests_by_model or request_id in request_ids:
+            continue
+        requests_by_model[model] = request
+        request_ids.add(request_id)
     scores = [
         normalize_score(request.get("truthScore"), 0)
         for request in requests_by_model.values()

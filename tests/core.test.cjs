@@ -131,6 +131,20 @@ test("local receipts enable credentials but not permanent storage readiness", ()
   );
 });
 
+test("two mock council responses do not mark model consensus ready", () => {
+  const items = core.archiveReadiness({
+    evidenceCount: 6,
+    requests: [
+      { model: "mock-a", requestId: "mock_request_a", truthScore: null, fallback: true },
+      { model: "mock-b", requestId: "mock_request_b", truthScore: null, fallback: true },
+    ],
+    archiveSeal: null,
+    credential: null,
+  });
+
+  assert.equal(items.find((item) => item.label === "模型会诊").ready, false);
+});
+
 test("NFT-ready metadata describes a future claim, not a mint", () => {
   const credential = {
     id: "witness-sha256abc",
@@ -194,6 +208,13 @@ test("verification response validation accepts only receipt-bound state-consiste
     ],
   };
   assert.equal(core.isValidVerificationResult(base), true);
+  assert.equal(
+    core.isValidVerificationResult({
+      ...base,
+      requests: [base.requests[0], { ...base.requests[1], requestId: "request-a" }],
+    }),
+    false,
+  );
   assert.equal(
     core.isValidVerificationResult({
       ...base,
@@ -263,6 +284,19 @@ test("verification transport rejects invalid JSON and invalid objects but accept
     }),
     fallback,
   );
+});
+
+test("archive seal responses reject every explicit HTTP failure", async () => {
+  for (const status of [400, 403, 413, 502]) {
+    await assert.rejects(
+      core.readArchiveSealResponse({
+        ok: false,
+        status,
+        json: async () => ({ error: `seal rejected ${status}` }),
+      }),
+      new RegExp(`seal rejected ${status}`),
+    );
+  }
 });
 
 test("numeric fallback preserves a legitimate zero", () => {
@@ -391,6 +425,7 @@ test("preset provenance and roadmap copy remain explicitly non-live", () => {
   const htmlSource = fs.readFileSync("index.html", "utf8");
 
   assert.doesNotMatch(appSource, /devshard-|gonka_req_/);
+  assert.doesNotMatch(appSource, /待链上认领/);
   assert.match(appSource, /mock_preset_/);
   assert.doesNotMatch(htmlSource, /Demo 视频/);
 });

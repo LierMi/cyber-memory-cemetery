@@ -109,7 +109,7 @@ node --check app.js
 npm run test:browser
 ```
 
-`npm run test:browser` 故意设置 `reuseExistingServer: false`，运行前必须停止任何手动占用 5177 端口的服务，否则 Playwright 会拒绝启动。Playwright 使用隔离的 Chromium，所有 Wayback、Gonka 和 Pinata 相关浏览器请求均由测试路由接管，分别在桌面和移动端运行 10 个流程测试，共 20 个测试；真实 Gonka 探针是套件之外的单独人工验证。
+`npm run test:browser` 故意设置 `reuseExistingServer: false`，运行前必须停止任何手动占用 5177 端口的服务，否则 Playwright 会拒绝启动。Playwright 使用隔离的 Chromium，所有 Wayback、Gonka 和 Pinata 相关浏览器请求均由测试路由接管，分别在桌面和移动端运行 12 个流程测试，共 24 个测试；真实 Gonka 探针是套件之外的单独人工验证。
 
 ## Render 部署配置
 

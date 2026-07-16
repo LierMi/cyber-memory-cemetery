@@ -156,10 +156,13 @@ class VerificationTrust:
         successful = [request for request in record["requests"] if _successful_request(request)]
         all_models = sorted({request.get("model") for request in record["requests"] if request.get("model")})
         successful_models = sorted({request["model"] for request in successful})
+        successful_request_ids = {request["requestId"] for request in successful}
         state = record["verificationState"]
         if state in {"live_consensus", "cached_live"}:
             if len(successful) < 2 or len(successful_models) < 2:
                 raise ReceiptError("Live verification requires two distinct successful models")
+            if len(successful_request_ids) < 2:
+                raise ReceiptError("Live verification requires two distinct successful Request IDs")
         elif state == "partial":
             if len(successful) != 1:
                 raise ReceiptError("Partial verification requires one successful model")
@@ -268,13 +271,26 @@ class VerificationTrust:
         ):
             raise ReceiptError("Verification state or score mismatch")
 
-        successful_models = sorted(
+        expected_request_claims = [
             {
-                request["model"]
-                for request in expected_record["requests"]
-                if _successful_request(request)
+                "model": request["model"],
+                "requestId": request["requestId"],
+                "truthScore": request["truthScore"],
+                "fallback": request["fallback"],
             }
-        )
+            for request in expected_record["requests"]
+        ]
+        if claims.get("requests") != expected_request_claims:
+            raise ReceiptError("Verification request claims mismatch")
+
+        successful = [
+            request for request in expected_record["requests"] if _successful_request(request)
+        ]
+        successful_models = sorted({request["model"] for request in successful})
+        successful_request_ids = {request["requestId"] for request in successful}
+        if claims["verificationState"] in {"live_consensus", "cached_live"}:
+            if len(successful_models) < 2 or len(successful_request_ids) < 2:
+                raise ReceiptError("Verification requires distinct model and Request ID claims")
         expected_models = successful_models or sorted(
             {
                 request["model"]
