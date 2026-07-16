@@ -3,7 +3,7 @@ services:
     name: cyber-memory-cemetery
     runtime: python
     plan: free
-    buildCommand: python3 -m py_compile server.py cemetery_core.py verification_cache.py
+    buildCommand: python3 -m py_compile server.py cemetery_core.py verification_cache.py verification_trust.py
     startCommand: python3 server.py
     healthCheckPath: /api/status
     envVars:

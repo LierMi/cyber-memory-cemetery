@@ -9,47 +9,130 @@ from unittest.mock import Mock, patch
 import server
 from server import build_council_prompt, format_evidence_package, normalize_evidence_package
 from verification_cache import VerificationCache
+from verification_trust import VerificationTrust
 
 
 class ArchiveSealTests(unittest.TestCase):
-    def archive_payload(self, verification_state="live_consensus"):
+    def setUp(self):
+        self.trust = VerificationTrust(
+            secret=b"archive-test-receipt-secret",
+            receipt_ttl_seconds=60,
+            now=lambda: 1000,
+        )
+
+    def archive_request(self, verification_state="live_consensus"):
+        evidence = self.trust.prepare_evidence(
+            "xiami",
+            {
+                "schema": "cyber-memory-cemetery/evidence/v1",
+                "caseId": "xiami",
+                "version": "2026-07-15.1",
+                "evidenceCompleteness": 92,
+                "claims": [
+                    {
+                        "id": "claim-a",
+                        "claim": "Short public fact.",
+                        "sourceTitle": "Public source",
+                        "sourceUrl": "https://example.test/source",
+                        "confidence": "primary",
+                        "publicArchiveAllowed": True,
+                    }
+                ],
+            },
+        )
+        live_requests = [
+            {
+                "role": "digital_archaeologist",
+                "model": "model-a",
+                "requestId": "gonka-a",
+                "requestedAt": "2026-07-15T12:00:00Z",
+                "truthScore": 90,
+                "summary": "A",
+                "verifiedFacts": [],
+                "uncertainClaims": [],
+                "riskFlags": [],
+                "fallback": False,
+            },
+            {
+                "role": "truth_verifier",
+                "model": "model-b",
+                "requestId": "gonka-b",
+                "requestedAt": "2026-07-15T12:00:01Z",
+                "truthScore": 84,
+                "summary": "B",
+                "verifiedFacts": [],
+                "uncertainClaims": [],
+                "riskFlags": [],
+                "fallback": False,
+            },
+        ]
+        if verification_state == "partial":
+            live_requests[1].update(
+                {"requestId": "mock_verifier", "truthScore": None, "fallback": True}
+            )
+        if verification_state == "demo_fallback":
+            for index, request in enumerate(live_requests):
+                request.update(
+                    {
+                        "model": f"mock-model-{index}",
+                        "requestId": f"mock_request_{index}",
+                        "truthScore": None,
+                        "fallback": True,
+                    }
+                )
+        truth_score = 87 if verification_state == "live_consensus" else 90 if verification_state == "partial" else 86
+        verification = {
+            "source": "mock" if verification_state == "demo_fallback" else "gonka",
+            "caseId": "xiami",
+            "verifiedAt": "2026-07-15T12:00:02Z",
+            "verificationState": verification_state,
+            "truthScore": truth_score,
+            "scoreSpread": 6 if verification_state == "live_consensus" else None,
+            "consensusConfidence": 90 if verification_state == "live_consensus" else 0,
+            "sealEligibility": "verified" if verification_state == "live_consensus" else "draft",
+            "cacheStatus": "test",
+            "requests": live_requests,
+            "notes": [],
+        }
+        issued = self.trust.issue(verification, evidence)
         return {
-            "case": {"id": "xiami"},
-            "contentCreatedAt": "2026-07-15T12:00:00Z",
-            "verification": {
-                "verificationState": verification_state,
-                "truthScore": 87,
-                "requests": [{"requestId": "gonka-a"}, {"requestId": "gonka-b"}],
+            "verificationReceipt": issued["verificationReceipt"],
+            "payload": {
+                "schema": "cyber-memory-cemetery/v0.2",
+                "case": {"id": "xiami"},
+                "contentCreatedAt": "2026-07-15T12:00:00Z",
+                "evidencePackage": issued["evidencePackage"],
+                "evidenceDigest": issued["evidenceDigest"],
+                "verification": issued["verificationRecord"],
             },
         }
 
     def test_retry_keeps_the_same_content_hash(self):
-        payload = {
-            "case": {"id": "xiami"},
-            "contentCreatedAt": "2026-07-15T12:00:00Z",
-            "verification": {"verificationState": "live_consensus"},
-        }
-        with patch.object(server, "PINATA_JWT", ""):
-            first = server.seal_archive({"payload": payload})
-            second = server.seal_archive({"payload": payload})
+        request = self.archive_request()
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", ""
+        ):
+            first = server.seal_archive(request)
+            second = server.seal_archive(request)
 
         self.assertEqual(first["contentHash"], second["contentHash"])
 
     def test_mock_archive_is_a_draft(self):
-        payload = {
-            "case": {"id": "xiami"},
-            "contentCreatedAt": "2026-07-15T12:00:00Z",
-            "verification": {"verificationState": "demo_fallback"},
-        }
-        with patch.object(server, "PINATA_JWT", ""):
-            result = server.seal_archive({"payload": payload})
+        request = self.archive_request("demo_fallback")
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", ""
+        ):
+            result = server.seal_archive(request)
 
         self.assertEqual(result["sealEligibility"], "draft")
 
     def test_local_receipt_uses_frozen_payload_metadata_and_local_id(self):
-        payload = self.archive_payload()
-        with patch.object(server, "PINATA_JWT", ""):
-            result = server.seal_archive({"payload": payload})
+        request = self.archive_request()
+        payload = request["payload"]
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", ""
+        ):
+            result = server.seal_archive(request)
 
         digest = result["contentHash"].split(":", 1)[1]
         self.assertEqual(result["provider"], "local-sealed")
@@ -60,11 +143,14 @@ class ArchiveSealTests(unittest.TestCase):
         self.assertEqual(result["requestIds"], ["gonka-a", "gonka-b"])
 
     def test_pinata_uploads_only_the_frozen_payload(self):
-        payload = self.archive_payload()
-        with patch.object(server, "PINATA_JWT", "test-jwt"), patch.object(
+        request = self.archive_request()
+        payload = request["payload"]
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", "test-jwt"
+        ), patch.object(
             server, "upload_pinata_json", return_value={"IpfsHash": "bafy-test"}
         ) as upload:
-            result = server.seal_archive({"payload": payload})
+            result = server.seal_archive(request)
 
         uploaded_payload = upload.call_args.args[0]
         self.assertEqual(uploaded_payload, payload)
@@ -73,24 +159,30 @@ class ArchiveSealTests(unittest.TestCase):
         self.assertEqual(result["archiveId"], "ipfs://bafy-test")
 
     def test_failed_pinata_upload_returns_a_retryable_local_receipt(self):
-        payload = self.archive_payload()
-        with patch.object(server, "PINATA_JWT", "test-jwt"), patch.object(
+        request = self.archive_request()
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", "test-jwt"
+        ), patch.object(
             server, "upload_pinata_json", side_effect=RuntimeError("offline")
         ):
-            result = server.seal_archive({"payload": payload})
+            result = server.seal_archive(request)
 
         self.assertEqual(result["provider"], "local-sealed")
         self.assertTrue(result["archiveId"].startswith("local://sha256/"))
         self.assertNotIn("ar://demo", result["archiveId"])
 
     def test_pinata_response_without_cid_returns_a_retryable_local_receipt(self):
-        payload = self.archive_payload()
-        with patch.object(server, "PINATA_JWT", "test-jwt"), patch.object(
+        request = self.archive_request()
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", "test-jwt"
+        ), patch.object(
             server, "upload_pinata_json", return_value={}
         ):
-            result = server.seal_archive({"payload": payload})
-        with patch.object(server, "PINATA_JWT", ""):
-            local_result = server.seal_archive({"payload": payload})
+            result = server.seal_archive(request)
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", ""
+        ):
+            local_result = server.seal_archive(request)
 
         self.assertEqual(result["provider"], "local-sealed")
         self.assertEqual(result["status"], "pinata-response-missing-cid")
@@ -112,6 +204,30 @@ class ArchiveSealTests(unittest.TestCase):
         self.assertEqual(response, {"gonka": "live", "ipfs": "configured", "cache": "enabled"})
         self.assertNotIn("gonka-secret", str(response))
         self.assertNotIn("pinata-secret", str(response))
+
+    def test_archive_handler_rejects_oversized_body_before_reading_it(self):
+        handler = object.__new__(server.Handler)
+        handler.path = "/api/archive/seal"
+        handler.headers = {"Content-Length": str(server.MAX_ARCHIVE_REQUEST_BYTES + 1)}
+        handler.rfile = Mock()
+        handler.send_json = Mock()
+
+        handler.do_POST()
+
+        handler.rfile.read.assert_not_called()
+        handler.send_json.assert_called_once_with(413, {"error": "Archive request is too large"})
+
+    def test_archive_handler_rejects_a_negative_body_length_before_reading_it(self):
+        handler = object.__new__(server.Handler)
+        handler.path = "/api/archive/seal"
+        handler.headers = {"Content-Length": "-1"}
+        handler.rfile = Mock()
+        handler.send_json = Mock()
+
+        handler.do_POST()
+
+        handler.rfile.read.assert_not_called()
+        handler.send_json.assert_called_once_with(400, {"error": "Invalid Content-Length"})
 
     def test_browser_fallback_uses_the_frozen_payload_canonical_hash(self):
         script = r"""
@@ -142,6 +258,62 @@ core.createLocalArchiveSeal(payload, { cryptoProvider: webcrypto }).then((seal) 
         self.assertEqual(seal["provider"], "local-sealed")
         self.assertEqual(seal["contentHash"], f"sha256:{digest}")
         self.assertEqual(seal["archiveId"], f"local://sha256/{digest}")
+
+    def test_server_rejects_a_missing_or_forged_verification_receipt(self):
+        request = self.archive_request()
+        missing = {"payload": request["payload"]}
+        forged = {**request, "verificationReceipt": "forged.receipt"}
+
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", "test-jwt"
+        ), patch.object(
+            server, "upload_pinata_json", return_value={}
+        ) as upload:
+            with self.assertRaisesRegex(ValueError, "receipt"):
+                server.seal_archive(missing)
+            with self.assertRaisesRegex(ValueError, "receipt"):
+                server.seal_archive(forged)
+
+        upload.assert_not_called()
+
+    def test_server_rejects_an_oversized_archive_before_pinata(self):
+        request = self.archive_request()
+        request["payload"]["padding"] = "x" * 600_000
+
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", "test-jwt"
+        ), patch.object(
+            server, "upload_pinata_json", return_value={}
+        ) as upload:
+            with self.assertRaisesRegex(ValueError, "too large"):
+                server.seal_archive(request)
+
+        upload.assert_not_called()
+
+    def test_server_rejects_a_valid_receipt_bound_to_different_archive_content(self):
+        request = self.archive_request()
+        request["payload"]["verification"]["truthScore"] = 99
+
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", "test-jwt"
+        ), patch.object(server, "upload_pinata_json", return_value={}) as upload:
+            with self.assertRaisesRegex(ValueError, "mismatch"):
+                server.seal_archive(request)
+
+        upload.assert_not_called()
+
+    def test_duplicate_valid_pinata_retry_reuses_the_existing_seal(self):
+        request = self.archive_request()
+        with patch.object(server, "VERIFICATION_TRUST", self.trust, create=True), patch.object(
+            server, "PINATA_JWT", "test-jwt"
+        ), patch.object(server, "ARCHIVE_SEAL_RESULTS", {}, create=True), patch.object(
+            server, "upload_pinata_json", return_value={"IpfsHash": "bafy-test"}
+        ) as upload:
+            first = server.seal_archive(request)
+            second = server.seal_archive(request)
+
+        self.assertEqual(second, first)
+        upload.assert_called_once()
 
 
 class VerificationCacheTests(unittest.TestCase):
@@ -270,17 +442,41 @@ class VerificationCacheTests(unittest.TestCase):
     def test_two_failed_models_use_real_cache(self):
         cached = {
             "source": "gonka",
+            "caseId": "xiami",
             "verificationState": "live_consensus",
             "verifiedAt": "2026-07-15T12:00:00Z",
+            "truthScore": 87,
+            "scoreSpread": 6,
+            "consensusConfidence": 90,
+            "sealEligibility": "verified",
+            "cacheAgeSeconds": 30,
             "requests": [
-                {"model": "archaeologist", "requestId": "gonka-a"},
-                {"model": "verifier", "requestId": "gonka-b"},
+                {
+                    "role": "digital_archaeologist",
+                    "model": "archaeologist",
+                    "requestId": "gonka-a",
+                    "requestedAt": "2026-07-15T11:59:58Z",
+                    "truthScore": 90,
+                    "fallback": False,
+                },
+                {
+                    "role": "truth_verifier",
+                    "model": "verifier",
+                    "requestId": "gonka-b",
+                    "requestedAt": "2026-07-15T11:59:59Z",
+                    "truthScore": 84,
+                    "fallback": False,
+                },
             ],
         }
-        with patch.object(server, "GONKA_API_KEY", "test-key"):
-            with patch.object(server, "run_live_council", side_effect=RuntimeError("offline")):
-                with patch.object(server.VERIFICATION_CACHE, "latest_for_case", return_value=cached):
-                    result = server.run_gonka_verification({"case": {"id": "xiami"}})
+        with patch.object(server, "GONKA_API_KEY", "test-key"), patch.object(
+            server,
+            "resolve_council_models",
+            return_value=("archaeologist", "verifier", ["archaeologist", "verifier"]),
+        ), patch.object(server, "run_live_council", side_effect=RuntimeError("offline")), patch.object(
+            server.VERIFICATION_CACHE, "latest_compatible", return_value=cached
+        ):
+            result = server.run_gonka_verification({"case": {"id": "xiami"}})
         self.assertEqual(result["verificationState"], "cached_live")
         self.assertEqual(result["requests"][0]["requestId"], "gonka-a")
         self.assertEqual(result["requests"][1]["model"], "verifier")
@@ -290,22 +486,181 @@ class VerificationCacheTests(unittest.TestCase):
     def test_two_member_failures_restore_latest_live_cache(self):
         cached = {
             "source": "gonka",
+            "caseId": "xiami",
             "verificationState": "live_consensus",
             "verifiedAt": "2026-07-15T12:00:00Z",
-            "requests": [{"requestId": "gonka-a"}, {"requestId": "gonka-b"}],
+            "truthScore": 87,
+            "scoreSpread": 6,
+            "consensusConfidence": 90,
+            "sealEligibility": "verified",
+            "cacheAgeSeconds": 30,
+            "requests": [
+                {
+                    "role": "digital_archaeologist",
+                    "model": "archaeologist",
+                    "requestId": "gonka-a",
+                    "requestedAt": "2026-07-15T11:59:58Z",
+                    "truthScore": 90,
+                    "fallback": False,
+                },
+                {
+                    "role": "truth_verifier",
+                    "model": "verifier",
+                    "requestId": "gonka-b",
+                    "requestedAt": "2026-07-15T11:59:59Z",
+                    "truthScore": 84,
+                    "fallback": False,
+                },
+            ],
         }
         with patch.object(server, "GONKA_API_KEY", "test-key"), patch.object(
-            server, "resolve_council_models", return_value=("archaeologist", "verifier", [])
+            server,
+            "resolve_council_models",
+            return_value=("archaeologist", "verifier", ["archaeologist", "verifier"]),
         ), patch.object(server, "run_council_member", side_effect=RuntimeError("offline")), patch.object(
-            server.VERIFICATION_CACHE, "latest_for_case", return_value=cached
+            server.VERIFICATION_CACHE, "latest_compatible", return_value=cached
         ):
             result = server.run_gonka_verification({"case": {"id": "xiami"}})
 
         self.assertEqual(result["verificationState"], "cached_live")
         self.assertEqual(result["requests"][1]["requestId"], "gonka-b")
 
+    def test_cache_recovery_requires_matching_evidence_version_digest_and_model_set(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = VerificationCache(Path(directory))
+            cache.write(
+                "compatible",
+                {
+                    "caseId": "xiami",
+                    "verificationState": "live_consensus",
+                    "verifiedAt": "1970-01-01T00:15:50Z",
+                    "evidenceVersion": "2026-07-15.1",
+                    "evidenceDigest": "sha256:expected",
+                    "modelSet": ["model-a", "model-b"],
+                    "requests": [],
+                },
+            )
+            incompatible_records = [
+                ("wrong-version", "2026-07-15.2", "sha256:expected", ["model-a", "model-b"]),
+                ("wrong-digest", "2026-07-15.1", "sha256:other", ["model-a", "model-b"]),
+                ("wrong-models", "2026-07-15.1", "sha256:expected", ["model-a", "model-c"]),
+            ]
+            for key, version, digest, models in incompatible_records:
+                cache.write(
+                    key,
+                    {
+                        "caseId": "xiami",
+                        "verificationState": "live_consensus",
+                        "verifiedAt": "1970-01-01T00:16:30Z",
+                        "evidenceVersion": version,
+                        "evidenceDigest": digest,
+                        "modelSet": models,
+                        "requests": [],
+                    },
+                )
+
+            result = cache.latest_compatible(
+                case_id="xiami",
+                evidence_version="2026-07-15.1",
+                evidence_digest="sha256:expected",
+                models=["model-b", "model-a"],
+                ttl_seconds=60,
+                now=1000,
+            )
+
+        self.assertEqual(result["cacheKey"], "compatible")
+        self.assertEqual(result["cacheAgeSeconds"], 50)
+
+    def test_cache_recovery_rejects_expired_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = VerificationCache(Path(directory))
+            cache.write(
+                "expired",
+                {
+                    "caseId": "xiami",
+                    "verificationState": "live_consensus",
+                    "verifiedAt": "1970-01-01T00:15:40Z",
+                    "evidenceVersion": "2026-07-15.1",
+                    "evidenceDigest": "sha256:expected",
+                    "modelSet": ["model-a", "model-b"],
+                    "requests": [],
+                },
+            )
+
+            result = cache.latest_compatible(
+                case_id="xiami",
+                evidence_version="2026-07-15.1",
+                evidence_digest="sha256:expected",
+                models=["model-a", "model-b"],
+                ttl_seconds=60,
+                now=1000,
+            )
+
+        self.assertIsNone(result)
+
 
 class GonkaCouncilStateTests(unittest.TestCase):
+    def test_duplicate_explicit_models_are_rejected_before_dispatch(self):
+        with patch.object(server, "GONKA_ARCHAEOLOGIST_MODEL", "model-a"), patch.object(
+            server, "GONKA_VERIFIER_MODEL", "model-a"
+        ), patch.object(server, "ordered_models", return_value=["model-a", "model-b"]):
+            with self.assertRaisesRegex(ValueError, "distinct"):
+                server.resolve_council_models()
+
+    def test_model_pool_with_fewer_than_two_distinct_models_is_rejected(self):
+        with patch.object(server, "GONKA_MODEL", "auto"), patch.object(
+            server, "GONKA_ARCHAEOLOGIST_MODEL", "auto"
+        ), patch.object(server, "GONKA_VERIFIER_MODEL", "auto"), patch.object(
+            server, "ordered_models", return_value=["model-a", "model-a"]
+        ):
+            with self.assertRaisesRegex(ValueError, "two distinct"):
+                server.resolve_council_models()
+
+    def test_missing_or_malformed_request_id_cannot_count_as_success(self):
+        for request_id in (None, "", "gonka_req_unknown", ["not-a-string"]):
+            with self.subTest(request_id=request_id):
+                normalized = server.normalize_council_request(
+                    {
+                        "role": "digital_archaeologist",
+                        "model": "model-a",
+                        "requestId": request_id,
+                        "details": {"truthScore": 88},
+                    },
+                    86,
+                )
+                self.assertTrue(normalized["fallback"])
+                self.assertIsNone(normalized["truthScore"])
+
+    def test_missing_malformed_or_non_finite_score_cannot_count_as_success(self):
+        for score in (None, True, False, "not-a-score", float("nan"), float("inf"), float("-inf")):
+            with self.subTest(score=score):
+                normalized = server.normalize_council_request(
+                    {
+                        "role": "truth_verifier",
+                        "model": "model-b",
+                        "requestId": "devshard-real-request",
+                        "details": {"truthScore": score},
+                    },
+                    86,
+                )
+                self.assertTrue(normalized["fallback"])
+                self.assertIsNone(normalized["truthScore"])
+
+    def test_malformed_model_json_cannot_count_as_success(self):
+        payload = {"case": {"id": "xiami", "truthScore": 86}}
+        with patch.object(
+            server,
+            "chat_completion",
+            return_value={"requestId": "devshard-real-request", "content": "not-json"},
+        ):
+            request = server.run_council_member(
+                "digital_archaeologist", "model-a", payload, 0.2
+            )
+        normalized = server.normalize_council_request(request, 86)
+
+        self.assertTrue(normalized["fallback"])
+        self.assertIsNone(normalized["truthScore"])
+
     def test_two_real_models_normalize_to_live_consensus_and_write_cache(self):
         payload = {
             "case": {"id": "xiami", "epitaph": "test"},
@@ -375,7 +730,7 @@ class GonkaCouncilStateTests(unittest.TestCase):
         self.assertEqual(result["verificationState"], "partial")
         self.assertEqual(result["sealEligibility"], "draft")
         self.assertEqual(result["cacheStatus"], "not_cached_partial")
-        self.assertIsInstance(result["requests"][1]["truthScore"], int)
+        self.assertIsNone(result["requests"][1]["truthScore"])
         write.assert_not_called()
 
 

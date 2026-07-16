@@ -23,8 +23,18 @@ class CemeteryCoreTests(unittest.TestCase):
     def test_two_live_models_create_live_consensus(self):
         result = aggregate_consensus(
             [
-                {"truthScore": 90, "fallback": False},
-                {"truthScore": 84, "fallback": False},
+                {
+                    "model": "model-a",
+                    "requestId": "request-a",
+                    "truthScore": 90,
+                    "fallback": False,
+                },
+                {
+                    "model": "model-b",
+                    "requestId": "request-b",
+                    "truthScore": 84,
+                    "fallback": False,
+                },
             ],
             evidence_completeness=92,
         )
@@ -36,13 +46,45 @@ class CemeteryCoreTests(unittest.TestCase):
     def test_one_live_model_is_partial(self):
         result = aggregate_consensus(
             [
-                {"truthScore": 88, "fallback": False},
-                {"truthScore": 93, "fallback": True},
+                {
+                    "model": "model-a",
+                    "requestId": "request-a",
+                    "truthScore": 88,
+                    "fallback": False,
+                },
+                {
+                    "model": "model-b",
+                    "requestId": "mock_request_b",
+                    "truthScore": 93,
+                    "fallback": True,
+                },
             ],
             evidence_completeness=92,
         )
         self.assertEqual(result["verificationState"], "partial")
         self.assertEqual(archive_eligibility(result["verificationState"]), "draft")
+
+    def test_duplicate_successful_model_ids_cannot_create_live_consensus(self):
+        result = aggregate_consensus(
+            [
+                {
+                    "model": "model-a",
+                    "requestId": "request-a",
+                    "truthScore": 90,
+                    "fallback": False,
+                },
+                {
+                    "model": "model-a",
+                    "requestId": "request-b",
+                    "truthScore": 84,
+                    "fallback": False,
+                },
+            ],
+            evidence_completeness=92,
+        )
+
+        self.assertEqual(result["verificationState"], "partial")
+        self.assertEqual(result["sealEligibility"], "draft")
 
     def test_only_live_receipts_are_verified_for_archive_sealing(self):
         self.assertEqual(archive_eligibility("live_consensus"), "verified")

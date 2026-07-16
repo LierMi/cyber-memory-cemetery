@@ -1,6 +1,9 @@
+import copy
+import hashlib
 import json
 import os
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -15,6 +18,7 @@ from cemetery_core import (
     normalize_score,
 )
 from verification_cache import VerificationCache
+from verification_trust import VerificationTrust
 
 
 def load_dotenv(path=".env"):
@@ -34,8 +38,8 @@ load_dotenv()
 GONKA_BASE_URL = os.getenv("GONKA_BASE_URL", "https://api.gonkascan.com/v1").rstrip("/")
 GONKA_API_KEY = os.getenv("GONKA_API_KEY", "")
 GONKA_MODEL = os.getenv("GONKA_MODEL", "deepseek-ai/DeepSeek-V3")
-GONKA_ARCHAEOLOGIST_MODEL = os.getenv("GONKA_ARCHAEOLOGIST_MODEL", GONKA_MODEL)
-GONKA_VERIFIER_MODEL = os.getenv("GONKA_VERIFIER_MODEL", GONKA_MODEL)
+GONKA_ARCHAEOLOGIST_MODEL = os.getenv("GONKA_ARCHAEOLOGIST_MODEL", "auto")
+GONKA_VERIFIER_MODEL = os.getenv("GONKA_VERIFIER_MODEL", "auto")
 GONKA_MODEL_PREFERENCE = os.getenv(
     "GONKA_MODEL_PREFERENCE",
     "MiniMaxAI/MiniMax-M2.7,moonshotai/Kimi-K2.6",
@@ -50,6 +54,16 @@ PINATA_PIN_JSON_URL = os.getenv(
 PINATA_GATEWAY_URL = os.getenv("PINATA_GATEWAY_URL", "https://gateway.pinata.cloud/ipfs/")
 MODEL_CACHE = None
 VERIFICATION_CACHE = VerificationCache("tmp/cache")
+VERIFICATION_CACHE_TTL_SECONDS = max(
+    1, int(os.getenv("VERIFICATION_CACHE_TTL_SECONDS", "3600"))
+)
+VERIFICATION_RECEIPT_TTL_SECONDS = max(
+    1, int(os.getenv("VERIFICATION_RECEIPT_TTL_SECONDS", "900"))
+)
+VERIFICATION_TRUST = VerificationTrust(receipt_ttl_seconds=VERIFICATION_RECEIPT_TTL_SECONDS)
+MAX_ARCHIVE_REQUEST_BYTES = 512 * 1024
+ARCHIVE_SEAL_RESULTS = {}
+ARCHIVE_SEAL_LOCK = threading.Lock()
 MAX_EVIDENCE_CLAIMS = 12
 MAX_EVIDENCE_CLAIM_LENGTH = 500
 MAX_EVIDENCE_SOURCE_TITLE_LENGTH = 200
@@ -132,22 +146,69 @@ def upload_pinata_json(payload, filename, content_hash_value):
 
 
 def seal_archive(request_payload):
-    payload = request_payload.get("payload") or {}
-    if not isinstance(payload, dict) or not payload:
-        raise ValueError("Missing archive payload")
-
+    payload, receipt_claims = VERIFICATION_TRUST.verify_archive(
+        request_payload, max_bytes=MAX_ARCHIVE_REQUEST_BYTES
+    )
     content_hash_value = content_hash(payload)
     content_digest = content_hash_value.split(":", 1)[1]
-    filename = request_payload.get("filename") or archive_filename(payload, content_digest)
+    filename = archive_filename(payload, content_digest)
     sealed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    verification = payload.get("verification") or {}
-    verification_state = verification.get("verificationState", "demo_fallback")
+    verification = payload["verification"]
+    verification_state = receipt_claims["verificationState"]
     eligibility = archive_eligibility(verification_state)
     request_ids = [
         request.get("requestId")
-        for request in verification.get("requests", [])
+        for request in receipt_claims["requests"]
         if isinstance(request, dict) and request.get("requestId")
     ]
+    seal_key = hashlib.sha256(
+        f"{request_payload['verificationReceipt']}:{content_hash_value}".encode("utf-8")
+    ).hexdigest()
+
+    if PINATA_JWT:
+        with ARCHIVE_SEAL_LOCK:
+            existing = ARCHIVE_SEAL_RESULTS.get(seal_key)
+            if existing:
+                return copy.deepcopy(existing)
+            result = _create_archive_seal(
+                payload,
+                filename,
+                content_hash_value,
+                content_digest,
+                sealed_at,
+                verification,
+                verification_state,
+                eligibility,
+                request_ids,
+            )
+            if result["provider"] == "pinata-ipfs":
+                ARCHIVE_SEAL_RESULTS[seal_key] = copy.deepcopy(result)
+            return result
+
+    return _create_archive_seal(
+        payload,
+        filename,
+        content_hash_value,
+        content_digest,
+        sealed_at,
+        verification,
+        verification_state,
+        eligibility,
+        request_ids,
+    )
+
+
+def _create_archive_seal(
+    payload,
+    filename,
+    content_hash_value,
+    content_digest,
+    sealed_at,
+    verification,
+    verification_state,
+    eligibility,
+    request_ids,
+):
     local_id = f"local://sha256/{content_digest}"
     provider = "local-sealed"
     status = "sealed-local"
@@ -185,7 +246,7 @@ def seal_archive(request_payload):
         receipt["notes"] = notes
 
     sealed_payload = {
-        "schema": "cyber-memory-cemetery/sealed/v0.1",
+        "schema": "cyber-memory-cemetery/sealed/v0.2",
         "archive": payload,
         "receipt": receipt,
     }
@@ -246,32 +307,39 @@ def ordered_models():
     preferred = [model.strip() for model in GONKA_MODEL_PREFERENCE.split(",") if model.strip()]
     ordered = [model for model in preferred if model in available]
     ordered.extend([model for model in available if model not in ordered])
-    return ordered
+    return list(dict.fromkeys(ordered))
 
 
 def resolve_council_models():
-    ordered = ordered_models()
+    ordered = list(dict.fromkeys(ordered_models()))
+    if len(ordered) < 2:
+        raise ValueError("Gonka model pool must contain at least two distinct model IDs")
 
-    def pick(configured, used=None):
-        used = used or set()
-        if configured and configured.lower() != "auto":
-            return configured
-        for model in ordered:
-            if model not in used:
-                return model
-        return ordered[0] if ordered else configured
+    configs = [GONKA_ARCHAEOLOGIST_MODEL, GONKA_VERIFIER_MODEL]
+    explicit = [
+        config.strip() if isinstance(config, str) and config.strip().lower() != "auto" else None
+        for config in configs
+    ]
+    if explicit[0] and explicit[1] and explicit[0] == explicit[1]:
+        raise ValueError("Gonka council requires distinct explicit model IDs")
+    for configured in explicit:
+        if configured and configured not in ordered:
+            raise ValueError(f"Configured Gonka model is unavailable: {configured}")
 
-    base = GONKA_MODEL
-    archaeologist_config = GONKA_ARCHAEOLOGIST_MODEL if GONKA_ARCHAEOLOGIST_MODEL else base
-    verifier_config = GONKA_VERIFIER_MODEL if GONKA_VERIFIER_MODEL else base
-    if archaeologist_config.lower() == "auto":
-        archaeologist_config = base
-    if verifier_config.lower() == "auto":
-        verifier_config = base
+    preferred_order = list(ordered)
+    if GONKA_MODEL in preferred_order:
+        preferred_order.remove(GONKA_MODEL)
+        preferred_order.insert(0, GONKA_MODEL)
 
-    archaeologist_model = pick(archaeologist_config)
-    verifier_model = pick(verifier_config, used={archaeologist_model})
-    return archaeologist_model, verifier_model, ordered
+    selected = []
+    for configured in explicit:
+        if configured:
+            selected.append(configured)
+            continue
+        selected.append(next(model for model in preferred_order if model not in selected))
+    if len(set(selected)) < 2:
+        raise ValueError("Gonka council requires two distinct model IDs")
+    return selected[0], selected[1], ordered
 
 
 def mock_verification(payload, reason=None):
@@ -549,7 +617,7 @@ def chat_completion(model, messages, temperature=0.25):
     choice = (result.get("choices") or [{}])[0]
     message = choice.get("message") or {}
     return {
-        "requestId": result.get("id") or result.get("request_id") or "gonka_req_unknown",
+        "requestId": result.get("id") or result.get("request_id"),
         "content": message.get("content", ""),
         "raw": result,
     }
@@ -651,12 +719,22 @@ def run_council_member(role, model, payload, temperature):
         temperature=temperature,
     )
     parsed = parse_json_object(completion["content"])
+    request_id = completion.get("requestId")
+    raw_score = parsed.get("truthScore", parsed.get("suggestedTruthScore")) if parsed else None
     if not parsed:
-        parsed = parse_partial_fields(completion["content"])
+        parsed = {"fallback": True, "reason": "Model response was not valid JSON."}
+    elif normalize_score(raw_score, None) is None:
+        parsed = {
+            **parsed,
+            "fallback": True,
+            "reason": "Model response did not contain a finite Truth Score.",
+        }
+    if not real_request_id(request_id):
+        parsed = {**parsed, "fallback": True, "reason": "Gonka response omitted a real Request ID."}
     return {
         "role": role,
         "model": model,
-        "requestId": completion["requestId"],
+        "requestId": request_id,
         "requestedAt": utc_timestamp(),
         "summary": model_summary(parsed, completion["content"]),
         "details": parsed,
@@ -671,18 +749,39 @@ def normalized_string_list(value):
     return [item for item in value if isinstance(item, str) and item]
 
 
+def real_request_id(value):
+    return bool(
+        isinstance(value, str)
+        and value.strip()
+        and value != "gonka_req_unknown"
+        and not value.startswith("mock_")
+    )
+
+
 def normalize_council_request(request, fallback_score):
     details = request.get("details") if isinstance(request.get("details"), dict) else {}
-    fallback = bool(request.get("fallback") or details.get("fallback"))
+    model = request.get("model")
+    request_id = request.get("requestId")
     raw_score = request.get("truthScore")
     if raw_score is None:
         raw_score = details.get("truthScore", details.get("suggestedTruthScore"))
+    normalized_score = normalize_score(raw_score, None)
+    fallback = bool(
+        request.get("fallback")
+        or details.get("fallback")
+        or not isinstance(model, str)
+        or not model.strip()
+        or not real_request_id(request_id)
+        or normalized_score is None
+    )
+    if not real_request_id(request_id):
+        request_id = make_mock_request_id(request.get("role") or "unknown", "invalid")
     return {
         "role": request.get("role"),
-        "model": request.get("model"),
-        "requestId": request.get("requestId"),
+        "model": model,
+        "requestId": request_id,
         "requestedAt": request.get("requestedAt") or utc_timestamp(),
-        "truthScore": normalize_score(raw_score, fallback_score),
+        "truthScore": None if fallback else normalized_score,
         "summary": request.get("summary", ""),
         "verifiedFacts": normalized_string_list(
             request.get("verifiedFacts", details.get("verifiedFacts", details.get("supportedFacts")))
@@ -692,7 +791,7 @@ def normalize_council_request(request, fallback_score):
         ),
         "riskFlags": normalized_string_list(request.get("riskFlags", details.get("riskFlags"))),
         "fallback": fallback,
-        "details": details,
+        "details": {**details, **({"fallback": True} if fallback else {})},
     }
 
 
@@ -701,13 +800,13 @@ def evidence_completeness(payload):
     return round(len(claims) * 100 / MAX_EVIDENCE_CLAIMS)
 
 
-def run_live_council(payload):
+def run_live_council(payload, council=None):
     case = payload.get("case", {})
     fallback_score = clamp_score(case.get("truthScore"), 86)
 
     requests = []
     notes = []
-    archaeologist_model, verifier_model, model_pool = resolve_council_models()
+    archaeologist_model, verifier_model, model_pool = council or resolve_council_models()
     council_jobs = [
         ("digital_archaeologist", archaeologist_model, 0.2),
         ("truth_verifier", verifier_model, 0.1),
@@ -759,30 +858,88 @@ def run_live_council(payload):
     return result
 
 
-def run_gonka_verification(payload):
-    if not GONKA_API_KEY:
-        return mock_verification(payload)
+def bind_verification_result(result, evidence, max_expires_at=None):
+    bound = dict(result)
+    package = evidence["package"]
+    bound["evidenceSchema"] = package["schema"]
+    bound["evidenceVersion"] = package["version"]
+    bound["evidenceDigest"] = evidence["digest"]
+    bound["modelSet"] = sorted(
+        {
+            request.get("model")
+            for request in bound.get("requests", [])
+            if isinstance(request, dict)
+            and not request.get("fallback")
+            and request.get("model")
+        }
+    )
+    bound.update(
+        VERIFICATION_TRUST.issue(bound, evidence, max_expires_at=max_expires_at)
+    )
+    return bound
 
+
+def run_gonka_verification(payload):
+    case_id = (payload.get("case") or {}).get("id") or "unknown"
+    evidence = VERIFICATION_TRUST.prepare_evidence(case_id, payload.get("evidencePackage"))
+    trusted_payload = dict(payload)
+    trusted_payload["evidencePackage"] = evidence["package"]
+
+    if not GONKA_API_KEY:
+        return bind_verification_result(mock_verification(trusted_payload), evidence)
+
+    council = None
     try:
-        result = run_live_council(payload)
+        council = resolve_council_models()
+        result = run_live_council(trusted_payload, council=council)
     except Exception:
-        cached = VERIFICATION_CACHE.latest_for_case((payload.get("case") or {}).get("id"))
+        selected_models = list(council[:2]) if council else []
+        cached = VERIFICATION_CACHE.latest_compatible(
+            case_id=case_id,
+            evidence_version=evidence["package"]["version"],
+            evidence_digest=evidence["digest"],
+            models=selected_models,
+            ttl_seconds=VERIFICATION_CACHE_TTL_SECONDS,
+        )
         if cached:
             restored = dict(cached)
             restored["verificationState"] = "cached_live"
             restored["sealEligibility"] = "verified"
             restored["cacheStatus"] = "restored_after_live_failure"
-            return restored
-        return mock_verification(payload, reason="Gonka unavailable and no live cache exists.")
+            remaining_cache_seconds = max(
+                1,
+                VERIFICATION_CACHE_TTL_SECONDS - restored.get("cacheAgeSeconds", 0),
+            )
+            return bind_verification_result(
+                restored,
+                evidence,
+                max_expires_at=int(time.time()) + remaining_cache_seconds,
+            )
+        return bind_verification_result(
+            mock_verification(
+                trusted_payload, reason="Gonka unavailable and no compatible live cache exists."
+            ),
+            evidence,
+        )
 
     if result["verificationState"] == "live_consensus":
-        evidence_version = (payload.get("evidencePackage") or {}).get("version", "unversioned")
+        result["evidenceSchema"] = evidence["package"]["schema"]
+        result["evidenceVersion"] = evidence["package"]["version"]
+        result["evidenceDigest"] = evidence["digest"]
+        result["modelSet"] = sorted(
+            {request.get("model") for request in result["requests"] if request.get("model")}
+        )
         result["cacheKey"] = cache_key(
-            result.get("caseId"), evidence_version, [request.get("model") for request in result["requests"]]
+            result.get("caseId"),
+            evidence["package"]["version"],
+            result["modelSet"],
+            evidence_digest=evidence["digest"],
         )
         result["cacheStatus"] = "written_live_consensus"
+        result = bind_verification_result(result, evidence)
         VERIFICATION_CACHE.write(result["cacheKey"], result)
-    return result
+        return result
+    return bind_verification_result(result, evidence)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -809,7 +966,17 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/api/archive/seal":
-            length = int(self.headers.get("Content-Length", "0"))
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except (TypeError, ValueError):
+                self.send_json(400, {"error": "Invalid Content-Length"})
+                return
+            if length < 0:
+                self.send_json(400, {"error": "Invalid Content-Length"})
+                return
+            if length > MAX_ARCHIVE_REQUEST_BYTES:
+                self.send_json(413, {"error": "Archive request is too large"})
+                return
             try:
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
                 result = seal_archive(payload)

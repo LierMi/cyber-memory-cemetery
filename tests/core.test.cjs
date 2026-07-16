@@ -38,12 +38,13 @@ test("credential is derived from the archive receipt", () => {
       archiveId: "ipfs://cid",
       contentCreatedAt: "2026-07-15T12:00:00Z",
       verificationState: "live_consensus",
+      sealEligibility: "verified",
       truthScore: 89,
       requestIds: ["request-a", "request-b"],
     },
   );
-  assert.equal(credential.id, "witness-sha256abc");
-  assert.equal(credential.status, "ready_for_onchain_claim");
+  assert.equal(credential.id, "witness-sha256abc-ipfscid");
+  assert.equal(credential.status, "future_claim_compatible");
   assert.equal(credential.issuedAt, "2026-07-15T12:00:00Z");
 });
 
@@ -53,6 +54,7 @@ test("credential IDs distinguish full SHA-256 hashes with the same prefix", () =
     archiveId: "ipfs://cid",
     contentCreatedAt: "2026-07-15T12:00:00Z",
     verificationState: "live_consensus",
+    sealEligibility: "verified",
     truthScore: 89,
   };
   const first = core.createCredential(item, {
@@ -65,6 +67,31 @@ test("credential IDs distinguish full SHA-256 hashes with the same prefix", () =
   });
 
   assert.notEqual(first.id, second.id);
+});
+
+test("credential identity changes when a local archive is promoted to IPFS", () => {
+  const item = { id: "xiami", name: "虾米音乐", image: "./assets/case-xiami.png" };
+  const receipt = {
+    contentHash: "sha256:abc",
+    contentCreatedAt: "2026-07-15T12:00:00Z",
+    verificationState: "live_consensus",
+    sealEligibility: "verified",
+    truthScore: 0,
+  };
+  const local = core.createCredential(item, {
+    ...receipt,
+    provider: "local-sealed",
+    archiveId: "local://sha256/abc",
+  });
+  const permanent = core.createCredential(item, {
+    ...receipt,
+    provider: "pinata-ipfs",
+    archiveId: "ipfs://bafy-test",
+  });
+
+  assert.notEqual(local.id, permanent.id);
+  assert.equal(local.truthScore, 0);
+  assert.equal(permanent.truthScore, 0);
 });
 
 test("readiness does not require Kite or a wallet", () => {
@@ -112,10 +139,136 @@ test("NFT-ready metadata describes a future claim, not a mint", () => {
     archiveId: "ipfs://cid",
     truthScore: 89,
     verificationState: "live_consensus",
+    status: "future_claim_compatible",
   };
   const metadata = core.createNftReadyMetadata(credential, { image: "./assets/case-xiami.png" });
-  assert.equal(metadata.attributes.find((item) => item.trait_type === "Claim Status").value, "Pending on-chain claim");
+  assert.equal(metadata.attributes.find((item) => item.trait_type === "Claim Status").value, "Future claim compatible");
   assert.equal(metadata.attributes.find((item) => item.trait_type === "Archive Hash").value, "sha256:abc");
+});
+
+test("draft credentials and metadata never claim verification or on-chain readiness", () => {
+  const item = { id: "xiami", name: "虾米音乐", image: "./assets/case-xiami.png" };
+  const credential = core.createCredential(item, {
+    provider: "local-sealed",
+    contentHash: "sha256:draft",
+    archiveId: "local://sha256/draft",
+    contentCreatedAt: "2026-07-15T12:00:00Z",
+    verificationState: "demo_fallback",
+    sealEligibility: "draft",
+    truthScore: 0,
+    requestIds: ["mock_a", "mock_b"],
+  });
+  const metadata = core.createNftReadyMetadata(credential, item);
+  const claimStatus = metadata.attributes.find((entry) => entry.trait_type === "Claim Status").value;
+
+  assert.equal(credential.status, "draft_memorial");
+  assert.equal(credential.truthScore, 0);
+  assert.doesNotMatch(metadata.description, /verified|ready for on-chain claim/i);
+  assert.doesNotMatch(claimStatus, /ready|pending|compatible/i);
+});
+
+test("credential workbench copy distinguishes verified compatibility from a draft", () => {
+  assert.equal(
+    core.credentialStatusCopy({ status: "future_claim_compatible" }),
+    "凭证已生成，可保留未来认领兼容性；当前没有发生链上铸造。",
+  );
+  assert.equal(
+    core.credentialStatusCopy({ status: "draft_memorial" }),
+    "凭证已生成，是不具备链上认领资格的草稿纪念文件。",
+  );
+  assert.equal(core.credentialStatusCopy(null), "完成封存后生成纪念凭证和 metadata。");
+});
+
+test("verification response validation accepts only receipt-bound state-consistent results", () => {
+  const base = {
+    source: "gonka",
+    verificationState: "live_consensus",
+    truthScore: 0,
+    evidenceDigest: `sha256:${"a".repeat(64)}`,
+    evidencePackage: { schema: "cyber-memory-cemetery/evidence/v1", version: "v1" },
+    verificationRecord: { verificationState: "live_consensus" },
+    verificationReceipt: "payload.signature",
+    requests: [
+      { model: "model-a", requestId: "request-a", truthScore: 0, fallback: false },
+      { model: "model-b", requestId: "request-b", truthScore: 84, fallback: false },
+    ],
+  };
+  assert.equal(core.isValidVerificationResult(base), true);
+  assert.equal(
+    core.isValidVerificationResult({
+      ...base,
+      source: "mock",
+      verificationState: "mock_fallback",
+      verificationRecord: { verificationState: "mock_fallback" },
+      requests: base.requests.map((request) => ({
+        ...request,
+        requestId: `mock_${request.requestId}`,
+        truthScore: null,
+        fallback: true,
+      })),
+    }),
+    false,
+  );
+  assert.equal(core.isValidVerificationResult({ ...base, verificationReceipt: "" }), false);
+  assert.equal(
+    core.isValidVerificationResult({
+      ...base,
+      requests: base.requests.map((request) => ({ ...request, model: "model-a" })),
+    }),
+    false,
+  );
+
+  const demo = {
+    ...base,
+    source: "mock",
+    verificationState: "demo_fallback",
+    verificationRecord: { verificationState: "demo_fallback" },
+    requests: [
+      { model: "mock-a", requestId: "mock_request_a", truthScore: null, fallback: true },
+      { model: "mock-b", requestId: "mock_request_b", truthScore: null, fallback: true },
+    ],
+  };
+  assert.equal(core.isValidVerificationResult(demo), true);
+  assert.equal(core.isValidVerificationResult({ ...demo, source: "gonka" }), false);
+});
+
+test("verification transport rejects invalid JSON and invalid objects but accepts explicit demo fallback", async () => {
+  await assert.rejects(
+    core.readVerificationResponse({ ok: true, json: async () => { throw new Error("bad json"); } }),
+    /invalid JSON/i,
+  );
+  await assert.rejects(
+    core.readVerificationResponse({ ok: true, status: 200, json: async () => ({}) }),
+    /invalid verification/i,
+  );
+
+  const fallback = {
+    source: "mock",
+    verificationState: "demo_fallback",
+    truthScore: 86,
+    evidenceDigest: `sha256:${"b".repeat(64)}`,
+    evidencePackage: { schema: "cyber-memory-cemetery/evidence/v1", version: "v1" },
+    verificationRecord: { verificationState: "demo_fallback" },
+    verificationReceipt: "payload.signature",
+    requests: [
+      { model: "mock-a", requestId: "mock_request_a", truthScore: null, fallback: true },
+      { model: "mock-b", requestId: "mock_request_b", truthScore: null, fallback: true },
+    ],
+  };
+  assert.equal(
+    await core.readVerificationResponse({
+      ok: false,
+      status: 502,
+      json: async () => ({ fallback }),
+    }),
+    fallback,
+  );
+});
+
+test("numeric fallback preserves a legitimate zero", () => {
+  assert.equal(core.finiteNumberOr(0, 86), 0);
+  assert.equal(core.finiteNumberOr(Number.NaN, 86), 86);
+  assert.equal(core.finiteNumberOr(undefined, 86), 86);
 });
 
 test("NFT-ready metadata recursively excludes mint and ownership fields and traits", () => {
@@ -231,4 +384,13 @@ test("archive UI promises counts only and keeps message content local", () => {
   assert.doesNotMatch(source, /条纪念留言会写入永久档案/);
   assert.match(source, /永久档案仅记录/);
   assert.match(source, /留言内容仅保留在本地，不会上传。/);
+});
+
+test("preset provenance and roadmap copy remain explicitly non-live", () => {
+  const appSource = fs.readFileSync("app.js", "utf8");
+  const htmlSource = fs.readFileSync("index.html", "utf8");
+
+  assert.doesNotMatch(appSource, /devshard-|gonka_req_/);
+  assert.match(appSource, /mock_preset_/);
+  assert.doesNotMatch(htmlSource, /Demo 视频/);
 });

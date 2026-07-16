@@ -7,18 +7,93 @@ const waybackRows = [
 ];
 
 function verificationResult(requestIds, truthScore = 88) {
-  return {
+  const evidenceDigest = `sha256:${"a".repeat(64)}`;
+  const evidencePackage = {
+    schema: "cyber-memory-cemetery/evidence/v1",
+    caseId: "xiami",
+    version: "2026-07-15.1",
+    curatedAt: "2026-07-15T12:00:00Z",
+    evidenceCompleteness: 92,
+    privacyBoundary: "Public summaries only.",
+    claims: [],
+  };
+  const requests = requestIds.map((requestId, index) => ({
+    role: index === 0 ? "digital_archaeologist" : "truth_verifier",
+    model: index === 0 ? "review-archaeologist" : "review-verifier",
+    requestId,
+    requestedAt: `2026-07-15T12:00:0${index}Z`,
+    truthScore,
+    summary: "Route-backed browser verification result.",
+    verifiedFacts: [],
+    uncertainClaims: [],
+    riskFlags: [],
+    fallback: false,
+  }));
+  const verificationRecord = {
+    source: "gonka",
+    caseId: "xiami",
+    verifiedAt: "2026-07-15T12:00:02Z",
     verificationState: "cached_live",
     truthScore,
+    scoreSpread: 0,
     consensusConfidence: 90,
-    requests: requestIds.map((requestId, index) => ({
-      role: index === 0 ? "digital_archaeologist" : "truth_verifier",
-      model: index === 0 ? "review-archaeologist" : "review-verifier",
-      requestId,
-      truthScore,
-      summary: "Route-backed browser verification result.",
-    })),
+    sealEligibility: "verified",
+    cacheStatus: "browser-route",
+    requests,
+    notes: [],
+    evidenceSchema: evidencePackage.schema,
+    evidenceVersion: evidencePackage.version,
+    evidenceDigest,
   };
+  return {
+    source: "gonka",
+    verificationState: "cached_live",
+    truthScore,
+    scoreSpread: 0,
+    consensusConfidence: 90,
+    sealEligibility: "verified",
+    verifiedAt: "2026-07-15T12:00:02Z",
+    cacheStatus: "browser-route",
+    requests,
+    evidenceDigest,
+    evidencePackage,
+    verificationRecord,
+    verificationReceipt: "browser-payload.browser-signature",
+  };
+}
+
+function archiveResult(payload, provider = "local-sealed") {
+  const permanent = provider === "pinata-ipfs";
+  const contentHash = `sha256:${"c".repeat(64)}`;
+  const archiveId = permanent ? "ipfs://bafy-browser-test" : `local://sha256/${"c".repeat(64)}`;
+  const requestIds = (payload.verification?.requests || []).map((request) => request.requestId);
+  return {
+    provider,
+    status: permanent ? "uploaded" : "sealed-local",
+    contentHash,
+    archiveId,
+    gatewayUrl: permanent ? "https://gateway.example/ipfs/bafy-browser-test" : "",
+    sealEligibility: payload.verification?.sealEligibility || "draft",
+    contentCreatedAt: payload.contentCreatedAt,
+    verificationState: payload.verification?.verificationState || "demo_fallback",
+    truthScore: payload.verification?.truthScore,
+    requestIds,
+    filename: "cyber-memory-xiami-browser.json",
+    json: JSON.stringify({ archive: payload }),
+    previewJson: JSON.stringify({ contentHash, archiveId }),
+    notes: [],
+  };
+}
+
+async function installDeterministicRoutes(page) {
+  await page.route("https://web.archive.org/cdx**", (route) => route.fulfill({ json: waybackRows }));
+  await page.route("**/api/gonka/verify", (route) =>
+    route.fulfill({ json: verificationResult(["browser-request-a", "browser-request-b"]) }),
+  );
+  await page.route("**/api/archive/seal", (route) => {
+    const payload = route.request().postDataJSON().payload;
+    return route.fulfill({ json: archiveResult(payload) });
+  });
 }
 
 async function enterCemetery(page) {
@@ -34,7 +109,8 @@ async function expectDemoComplete(page) {
     .toEqual(Array(6).fill("done"));
 }
 
-test.beforeEach(async ({ request }) => {
+test.beforeEach(async ({ request, page }) => {
+  await installDeterministicRoutes(page);
   const response = await request.get("http://127.0.0.1:5177/api/status");
   expect(response.ok()).toBeTruthy();
   await expect(response.json()).resolves.toMatchObject({ cache: "enabled" });
@@ -173,7 +249,7 @@ test("route-backed evidence failure retries without repeating completed operatio
   });
   await page.route("**/api/archive/seal", async (route) => {
     archiveRequests += 1;
-    await route.continue();
+    await route.fulfill({ json: archiveResult(route.request().postDataJSON().payload) });
   });
 
   await enterCemetery(page);
@@ -214,7 +290,7 @@ test("a fresh second run seals only the second verification payload", async ({ p
   });
   await page.route("**/api/archive/seal", async (route) => {
     archivePayloads.push(route.request().postDataJSON().payload);
-    await route.continue();
+    await route.fulfill({ json: archiveResult(route.request().postDataJSON().payload) });
   });
 
   await enterCemetery(page);
@@ -256,7 +332,7 @@ test("running demo blocks manual case, seal, and credential mutation", async ({ 
   });
   await page.route("**/api/archive/seal", async (route) => {
     archiveRequests += 1;
-    await route.continue();
+    await route.fulfill({ json: archiveResult(route.request().postDataJSON().payload) });
   });
 
   await enterCemetery(page);
@@ -306,7 +382,7 @@ test("retained archive work keeps mutations locked until retry consumes it", asy
   await page.route("**/api/archive/seal", async (route) => {
     archiveRequests += 1;
     await archiveGate;
-    await route.continue();
+    await route.fulfill({ json: archiveResult(route.request().postDataJSON().payload) });
   });
 
   await enterCemetery(page);
@@ -357,4 +433,103 @@ test("progress is one column at the 719px boundary", async ({ page }) => {
     (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
   );
   expect(columns).toBe(1);
+});
+
+test("network and invalid JSON verification failures stop the demo until retry", async ({ page }) => {
+  let mode = "network";
+  let attempts = 0;
+  await page.route("**/api/gonka/verify", async (route) => {
+    attempts += 1;
+    if (mode === "network") {
+      await route.abort("failed");
+      return;
+    }
+    if (mode === "invalid-json") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{invalid" });
+      return;
+    }
+    await route.fulfill({ json: verificationResult(["retry-request-a", "retry-request-b"]) });
+  });
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+  await expect(page.locator('[data-demo-step="3"]')).toHaveAttribute("data-status", "failed");
+  expect(attempts).toBe(1);
+
+  mode = "invalid-json";
+  await page.getByRole("button", { name: "从失败步骤重试" }).click();
+  await expect.poll(() => attempts).toBe(2);
+  await expect(page.locator('[data-demo-step="3"]')).toHaveAttribute("data-status", "failed");
+  await expect(page.locator("[data-demo-summary]")).toContainText(/invalid JSON/i);
+
+  mode = "valid";
+  await page.getByRole("button", { name: "从失败步骤重试" }).click();
+  await expectDemoComplete(page);
+  expect(attempts).toBe(3);
+});
+
+test("zero Truth Score is preserved in the UI and frozen archive", async ({ page }) => {
+  let archivedPayload;
+  await page.route("**/api/gonka/verify", (route) =>
+    route.fulfill({ json: verificationResult(["zero-request-a", "zero-request-b"], 0) }),
+  );
+  await page.route("**/api/archive/seal", (route) => {
+    archivedPayload = route.request().postDataJSON().payload;
+    return route.fulfill({ json: archiveResult(archivedPayload) });
+  });
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+  await expectDemoComplete(page);
+
+  await expect(page.locator(".truth-score strong").first()).toHaveText("0");
+  expect(archivedPayload.verification.truthScore).toBe(0);
+});
+
+test("local-to-IPFS promotion invalidates and regenerates the credential", async ({ page }) => {
+  let archiveCalls = 0;
+  await page.route("**/api/archive/seal", (route) => {
+    archiveCalls += 1;
+    const payload = route.request().postDataJSON().payload;
+    return route.fulfill({
+      json: archiveResult(payload, archiveCalls === 1 ? "local-sealed" : "pinata-ipfs"),
+    });
+  });
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+  await expectDemoComplete(page);
+  const credentialCode = page.locator(".credential-preview code").first();
+  const localCredentialId = await credentialCode.textContent();
+  await expect(page.getByRole("button", { name: "下载纪念凭证" }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "重新上传 IPFS" }).first().click();
+  await expect(page.getByRole("button", { name: "下载纪念凭证" })).toHaveCount(0);
+  await page.getByRole("button", { name: "生成纪念凭证" }).first().click();
+
+  await expect(credentialCode).not.toHaveText(localCredentialId);
+  expect(await credentialCode.textContent()).toContain("ipfsbafybrowsertest");
+});
+
+test("museum tabs expose complete semantics and update selection", async ({ page }) => {
+  await enterCemetery(page);
+  const exhibitTab = page.locator("#museum-tab-exhibit");
+  const consoleTab = page.locator("#museum-tab-console");
+  const archiveTab = page.locator("#museum-tab-archive");
+
+  await expect(exhibitTab).toHaveAttribute("aria-selected", "true");
+  await expect(exhibitTab).toHaveAttribute("aria-controls", "museum-panel-exhibit");
+  await expect(page.locator("#museum-panel-exhibit")).toHaveAttribute(
+    "aria-labelledby",
+    "museum-tab-exhibit",
+  );
+
+  await consoleTab.click();
+  await expect(consoleTab).toHaveAttribute("aria-selected", "true");
+  await expect(exhibitTab).toHaveAttribute("aria-selected", "false");
+  await expect(page.locator("#museum-panel-console")).toBeVisible();
+  await consoleTab.press("ArrowRight");
+  await expect(archiveTab).toBeFocused();
+  await expect(archiveTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#museum-panel-archive")).toBeVisible();
 });

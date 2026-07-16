@@ -2,6 +2,8 @@
 
 - [x] Live Gonka Router call returns two different model names
 - [x] Both model Request IDs are visible
+- [x] Verification response includes evidence digest and a server-issued receipt
+- [x] Cache recovery enforces evidence/version/model compatibility and TTL
 - [x] Truth Score, score spread, and consensus confidence are visible
 - [x] Demo fallback is visibly labeled
 - [ ] Public evidence links open
@@ -10,11 +12,14 @@
 - [x] Local-only storage is visibly labeled when Pinata is absent
 - [x] Memorial credential downloads successfully
 - [x] GitHub README contains setup and verification commands
+- [x] Browser suite stubs Wayback, Gonka, and archive upload paths
 - [ ] Public deployment URL is recorded before submission
 
 ## Verification policy
 
 An item is checked only after Task 8 verifies it directly. A `cached_live`, `partial`, or demo result does not satisfy the live Gonka items. A `local-sealed` receipt does not satisfy the IPFS CID item. The public deployment URL remains unchecked until a real deployed service is available.
+
+Before `npm run test:browser`, stop any manually running server on port 5177. Playwright intentionally uses `reuseExistingServer: false`. Verification receipts default to a 900-second TTL, compatible live-cache records default to 3600 seconds, and both limits may be overridden with the documented environment variables.
 
 ## Unchecked items
 

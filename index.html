@@ -78,19 +78,19 @@
 
       <section class="museum-main" aria-label="墓碑档案">
         <div class="museum-tabs" role="tablist" aria-label="档案视图">
-          <button class="museum-tab active" type="button" data-museum-tab="exhibit" role="tab">
+          <button id="museum-tab-exhibit" class="museum-tab active" type="button" data-museum-tab="exhibit" role="tab" aria-selected="true" aria-controls="museum-panel-exhibit" tabindex="0">
             展品详情
           </button>
-          <button class="museum-tab" type="button" data-museum-tab="console" role="tab">
+          <button id="museum-tab-console" class="museum-tab" type="button" data-museum-tab="console" role="tab" aria-selected="false" aria-controls="museum-panel-console" tabindex="-1">
             调查控制台
             <span>AI</span>
           </button>
-          <button class="museum-tab" type="button" data-museum-tab="archive" role="tab">
+          <button id="museum-tab-archive" class="museum-tab" type="button" data-museum-tab="archive" role="tab" aria-selected="false" aria-controls="museum-panel-archive" tabindex="-1">
             封存计划
           </button>
         </div>
 
-        <div class="tab-panel active" data-tab-panel="exhibit">
+        <div id="museum-panel-exhibit" class="tab-panel active" data-tab-panel="exhibit" role="tabpanel" aria-labelledby="museum-tab-exhibit">
           <section class="hero museum-intro">
             <div class="hero-copy">
               <p class="kicker">Gonka Truth Engine for Lost Web2 Communities</p>
@@ -154,7 +154,7 @@
           </section>
         </div>
 
-        <div class="tab-panel" data-tab-panel="console" hidden>
+        <div id="museum-panel-console" class="tab-panel" data-tab-panel="console" role="tabpanel" aria-labelledby="museum-tab-console" hidden>
           <section id="lab" class="lab">
             <div class="section-heading compact">
               <p class="kicker">Agent Console</p>
@@ -197,7 +197,7 @@
           </section>
         </div>
 
-        <div class="tab-panel" data-tab-panel="archive" hidden>
+        <div id="museum-panel-archive" class="tab-panel" data-tab-panel="archive" role="tabpanel" aria-labelledby="museum-tab-archive" hidden>
           <section id="roadmap" class="roadmap">
             <div class="roadmap-copy">
               <p class="kicker">Archive Plan</p>
@@ -257,7 +257,7 @@
               </div>
               <div>
                 <strong>Day 3</strong>
-                <span>永久档案、纪念凭证、IPFS 状态、Demo 视频和 README。</span>
+                <span>永久档案、纪念凭证、IPFS 状态、响应式检查、提交 QA 和 README。</span>
               </div>
             </div>
           </section>

@@ -15,6 +15,10 @@
 | `partial` | 只有一个真实 Gonka 模型成功 | `draft`，不宣称已达成共识 |
 | `demo_fallback` | 未配置密钥，或实时请求失败且没有可用缓存时的本地演示结果 | `draft`，结果的 `source` 为 `mock`，Request ID 以 `mock_` 开头 |
 
+服务端会把规范化证据包的 schema、版本和 SHA-256 digest 与模型集合、真实 Request ID、各模型分数、Truth Score、状态和验证时间一起写入 HMAC 验证回执。回执签名密钥只存在于当前服务进程；服务重启后旧回执失效。`/api/archive/seal` 只接受未过期且与冻结档案完全匹配的回执，档案资格由服务端重新计算。
+
+实时共识缓存只在案例 ID、证据版本、证据 digest 和两个不同模型 ID 全部匹配时恢复。默认缓存 TTL 为 3600 秒，默认验证回执 TTL 为 900 秒；`cached_live` 响应会显示经过净化的 `cacheAgeSeconds`。可通过 `VERIFICATION_CACHE_TTL_SECONDS` 和 `VERIFICATION_RECEIPT_TTL_SECONDS` 覆盖默认值。
+
 存储状态与验证状态是两件独立的事：
 
 | provider | 含义 |
@@ -24,7 +28,7 @@
 
 Pinata 未配置或上传失败时，系统保留 SHA-256 和可下载 JSON，并明确显示 `local-sealed`。系统不会伪造 CID。
 
-纪念凭证是基于封存回执生成的可下载 JSON。同时可下载未来 NFT-ready metadata，但当前版本不连接钱包、不发起链上交易，也不铸造 NFT。
+纪念凭证是基于封存回执生成的可下载 JSON。只有 `live_consensus` 或兼容的 `cached_live` 与 `verified` 封存资格组合会标记为未来认领兼容；`partial` 和 `demo_fallback` 只生成中性草稿。当前版本不连接钱包、不发起链上交易，也不铸造 NFT。
 
 ## 证据与隐私边界
 
@@ -45,6 +49,8 @@ GONKA_VERIFIER_MODEL=auto
 GONKA_MODEL_PREFERENCE=MiniMaxAI/MiniMax-M2.7,moonshotai/Kimi-K2.6
 GONKA_TIMEOUT_SECONDS=35
 GONKA_MAX_TOKENS=180
+VERIFICATION_CACHE_TTL_SECONDS=3600
+VERIFICATION_RECEIPT_TTL_SECONDS=900
 
 PINATA_JWT=
 PINATA_PIN_JSON_URL=https://api.pinata.cloud/pinning/pinJSONToIPFS
@@ -79,8 +85,8 @@ python3 server.py
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
 | `GET` | `/api/status` | 返回 `gonka`、`ipfs` 和 `cache` 的能力状态，不返回密钥或 token |
-| `POST` | `/api/gonka/verify` | 接收案例、Wayback 摘要和公开证据包，返回标记了来源的验证结果 |
-| `POST` | `/api/archive/seal` | 计算规范化档案 SHA-256，并在可用时尝试 Pinata IPFS 上传 |
+| `POST` | `/api/gonka/verify` | 规范化公开证据包，返回证据 digest、冻结验证记录和短期 HMAC 回执 |
+| `POST` | `/api/archive/seal` | 验证回执和证据绑定，计算档案 SHA-256，并在可用时尝试 Pinata IPFS 上传 |
 
 状态检查：
 
@@ -95,21 +101,21 @@ curl -sS http://127.0.0.1:5177/api/status
 从仓库根目录运行完整套件：
 
 ```bash
-python3 -m unittest tests/test_cemetery_core.py tests/test_server.py -v
+python3 -m unittest tests/test_cemetery_core.py tests/test_verification_trust.py tests/test_server.py -v
 node --test tests/core.test.cjs
-python3 -m py_compile server.py cemetery_core.py verification_cache.py
+python3 -m py_compile server.py cemetery_core.py verification_cache.py verification_trust.py
 node --check core.js
 node --check app.js
 npm run test:browser
 ```
 
-Playwright 使用隔离的 Chromium，分别在桌面和移动端运行 6 个流程测试，共 12 个测试。
+`npm run test:browser` 故意设置 `reuseExistingServer: false`，运行前必须停止任何手动占用 5177 端口的服务，否则 Playwright 会拒绝启动。Playwright 使用隔离的 Chromium，所有 Wayback、Gonka 和 Pinata 相关浏览器请求均由测试路由接管，分别在桌面和移动端运行 10 个流程测试，共 20 个测试；真实 Gonka 探针是套件之外的单独人工验证。
 
 ## Render 部署配置
 
 `render.yaml` 定义了一个 Python Web Service：
 
-- 构建命令：`python3 -m py_compile server.py cemetery_core.py verification_cache.py`
+- 构建命令：`python3 -m py_compile server.py cemetery_core.py verification_cache.py verification_trust.py`
 - 启动命令：`python3 server.py`
 - 健康检查：`/api/status`
 - 宿主绑定：`HOST=0.0.0.0`
@@ -123,10 +129,13 @@ Playwright 使用隔离的 Chromium，分别在桌面和移动端运行 6 个流
 
 - `/api/status` 的 `gonka` 为 `demo_fallback`：检查 `.env` 中是否配置 `GONKA_API_KEY`，然后重启服务。
 - 页面显示 `CACHED LIVE`：当前 Gonka 请求失败，系统恢复了之前的实时共识缓存。这不是当前实时验证。
+- 缓存未恢复：检查案例、证据版本、证据 digest 和模型集合是否完全匹配，并确认记录未超过 `VERIFICATION_CACHE_TTL_SECONDS`。
+- 服务端封存回退到浏览器本地封存：验证回执可能缺失、与证据不匹配、已过期，或因服务重启变得不可识别。重新运行 Gonka 会诊可取得新回执。
 - 页面显示 `PARTIAL`：只有一个模型成功，检查模型可用性、超时和 Router 响应。
 - 档案显示 `local-sealed`：当前没有可用的 Pinata CID。配置 `PINATA_JWT` 后重新封存，或继续使用本地 JSON 和 SHA-256 进行演示。
 - 端口被占用：使用其他端口启动，例如 `PORT=5180 python3 server.py`。
 - Playwright 缺少浏览器：运行 `npx playwright install chromium`。
+- Playwright 报告 5177 端口占用：先停止手动运行的 `python3 server.py`，再执行 `npm run test:browser`。
 - Pinata 返回错误或缺少 CID：档案会降级为 `local-sealed`，不会构造 CID。
 
 ## 明确排除的功能

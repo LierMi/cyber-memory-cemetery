@@ -156,8 +156,8 @@ const cases = [
       },
     ],
     requests: [
-      ["digital_archaeologist", "gonka_req_renren_6b7a10"],
-      ["truth_verifier", "gonka_req_renren_938cab"],
+      ["digital_archaeologist", "mock_preset_renren_archaeologist"],
+      ["truth_verifier", "mock_preset_renren_verifier"],
     ],
   },
   {
@@ -281,15 +281,19 @@ const cases = [
     requests: [
       {
         role: "digital_archaeologist",
-        model: "MiniMaxAI/MiniMax-M2.7",
-        requestId: "devshard-23538-19653",
-        summary: "真实 Gonka 会诊已返回 Request ID，正文被 reasoning 或 token 限制截断。",
+        model: "preset",
+        requestId: "mock_preset_xiami_archaeologist",
+        truthScore: null,
+        summary: "预置演示轨迹，等待 Gonka Router 实时验证。",
+        fallback: true,
       },
       {
         role: "truth_verifier",
-        model: "moonshotai/Kimi-K2.6",
-        requestId: "devshard-23542-679",
-        summary: "虾米音乐于 2008 年上线，2021 年分阶段关停，是中文独立音乐重要平台。",
+        model: "preset",
+        requestId: "mock_preset_xiami_verifier",
+        truthScore: null,
+        summary: "预置演示轨迹，等待 Gonka Router 实时验证。",
+        fallback: true,
       },
     ],
   },
@@ -317,8 +321,8 @@ const cases = [
       ["内容形态", "个人长文和日记是平台主要文化资产"],
     ],
     requests: [
-      ["digital_archaeologist", "gonka_req_blog163_e20a61"],
-      ["truth_verifier", "gonka_req_blog163_7f43bc"],
+      ["digital_archaeologist", "mock_preset_blog163_archaeologist"],
+      ["truth_verifier", "mock_preset_blog163_verifier"],
     ],
   },
   {
@@ -345,8 +349,8 @@ const cases = [
       ["文化标签", "长帖、公共讨论和民间叙事具有高识别度"],
     ],
     requests: [
-      ["digital_archaeologist", "gonka_req_tianya_c9e187"],
-      ["truth_verifier", "gonka_req_tianya_45bd2a"],
+      ["digital_archaeologist", "mock_preset_tianya_archaeologist"],
+      ["truth_verifier", "mock_preset_tianya_verifier"],
     ],
   },
   {
@@ -373,8 +377,8 @@ const cases = [
       ["文化价值", "网络梗与论坛亚文化是主要遗产"],
     ],
     requests: [
-      ["digital_archaeologist", "gonka_req_mop_0ab61f"],
-      ["truth_verifier", "gonka_req_mop_92d77a"],
+      ["digital_archaeologist", "mock_preset_mop_archaeologist"],
+      ["truth_verifier", "mock_preset_mop_verifier"],
     ],
   },
 ];
@@ -497,7 +501,12 @@ function updateCaseSelection() {
 function activateMuseumTab(tabId) {
   const nextTab = tabId || "exhibit";
   document.querySelectorAll("[data-museum-tab]").forEach((button) => {
-    button.classList.toggle("active", button.getAttribute("data-museum-tab") === nextTab);
+    const isActive = button.getAttribute("data-museum-tab") === nextTab;
+    button.classList.toggle("active", isActive);
+    if (button.getAttribute("role") === "tab") {
+      button.setAttribute("aria-selected", String(isActive));
+      button.setAttribute("tabindex", isActive ? "0" : "-1");
+    }
   });
   document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
     const isActive = panel.getAttribute("data-tab-panel") === nextTab;
@@ -704,7 +713,7 @@ function renderVerificationState(verification) {
 
 function renderConsensusMeter(verification) {
   const presentation = CemeteryCore.verificationPresentation(verification);
-  const confidence = Number(verification?.consensusConfidence || 0);
+  const confidence = CemeteryCore.finiteNumberOr(verification?.consensusConfidence, 0);
   return `<section class="consensus-meter ${presentation.tone}">
     <span>${escapeHtml(presentation.label)}</span>
     <strong>${confidence}% 共识置信度</strong>
@@ -770,6 +779,10 @@ function renderEvidenceConfidence(item) {
 function renderCredentialPanel(item, archiveSeal) {
   const credential = state.credentials[item.id];
   const hasReceipt = CemeteryCore.isStructurallyValidArchiveReceipt(archiveSeal);
+  const claimCompatible =
+    archiveSeal?.sealEligibility === "verified" &&
+    (archiveSeal?.verificationState === "live_consensus" ||
+      archiveSeal?.verificationState === "cached_live");
   const disabled = hasReceipt ? "" : "disabled";
   return `
     <div class="detail-section credential-panel">
@@ -783,7 +796,13 @@ function renderCredentialPanel(item, archiveSeal) {
         </div>
         <div class="credential-copy">
           <p class="text-note">
-            ${hasReceipt ? "凭证由可验证封存回执生成，链上状态为待认领。" : "先完成可验证封存，系统才能依据回执生成纪念凭证。"}
+            ${
+              !hasReceipt
+                ? "先完成封存，系统才能依据回执生成纪念凭证。"
+                : claimCompatible
+                  ? "凭证绑定已验证档案，可保留未来认领兼容性；当前没有发生链上铸造。"
+                  : "当前凭证是草稿纪念文件，不具备链上认领资格。"
+            }
           </p>
           <div class="archive-actions">
             <button class="button primary" type="button" data-action="generate-credential" ${disabled}>
@@ -792,7 +811,7 @@ function renderCredentialPanel(item, archiveSeal) {
             ${
               credential
                 ? `<button class="button secondary" type="button" data-action="download-credential">下载纪念凭证</button>
-                   <button class="button secondary" type="button" data-action="download-credential-metadata">下载链上兼容 metadata</button>`
+                   <button class="button secondary" type="button" data-action="download-credential-metadata">下载 metadata</button>`
                 : ""
             }
           </div>
@@ -805,7 +824,9 @@ function renderCredentialPanel(item, archiveSeal) {
               <div><dt>Credential ID</dt><dd>${escapeHtml(credential.id)}</dd></div>
               <div><dt>Archive Hash</dt><dd>${escapeHtml(credential.contentHash)}</dd></div>
               <div><dt>Verification State</dt><dd>${escapeHtml(credential.verificationState)}</dd></div>
-              <div><dt>Claim Status</dt><dd>待链上认领</dd></div>
+              <div><dt>Claim Status</dt><dd>${
+                credential.status === "future_claim_compatible" ? "未来认领兼容" : "草稿，不具备认领资格"
+              }</dd></div>
             </dl>
           `
           : ""
@@ -923,7 +944,7 @@ function renderProofChainBoard(item, archiveSeal, requests, verificationSource) 
     {
       label: "Witness",
       value: credential ? compactHash(credential.id, 16, 8) : "pending",
-      note: credential ? "纪念凭证已生成，链上状态为待认领。" : "等待封存后生成纪念凭证。",
+      note: CemeteryCore.credentialStatusCopy(credential),
       ready: Boolean(credential),
     },
     {
@@ -1113,7 +1134,7 @@ function renderArchiveWorkbench(item, archiveSeal) {
       <article>
         <span>Memorial Credential</span>
         <strong>${escapeHtml(credential?.id || "待生成")}</strong>
-        <p>${credential ? "凭证已生成，链上状态为待认领。" : "完成封存后生成凭证和链上兼容 metadata。"}</p>
+        <p>${escapeHtml(CemeteryCore.credentialStatusCopy(credential))}</p>
         <button class="button secondary" type="button" data-action="generate-credential" ${CemeteryCore.isStructurallyValidArchiveReceipt(archiveSeal) ? "" : "disabled"}>
           生成凭证
         </button>
@@ -1164,6 +1185,7 @@ function normalizePresetRequest(request) {
       verifiedFacts: [],
       uncertainClaims: [],
       riskFlags: [],
+      fallback: true,
     };
   }
   return {
@@ -1213,8 +1235,23 @@ function buildArchivePayload(item, liveArchive, verification) {
   const verificationSource =
     verificationSourceByState[verification?.verificationState] || "unverified-result";
 
+  const presetVerification = {
+    source: verificationSource,
+    caseId: item.id,
+    verifiedAt: new Date().toISOString(),
+    verificationState: verification?.verificationState || "demo_fallback",
+    truthScore: CemeteryCore.finiteNumberOr(verification?.truthScore, item.truthScore),
+    scoreSpread: verification?.scoreSpread ?? null,
+    consensusConfidence: CemeteryCore.finiteNumberOr(verification?.consensusConfidence, 0),
+    sealEligibility: verification?.sealEligibility || "draft",
+    cacheStatus: verification?.cacheStatus || "not_cached_local_preset",
+    requests: verification?.requests || item.requests.map(normalizePresetRequest),
+    notes: verification?.notes || [],
+  };
+  const evidencePackage = verification?.evidencePackage || evidencePackages.get(item.id) || null;
+
   return {
-    schema: "cyber-memory-cemetery/v0.1",
+    schema: "cyber-memory-cemetery/v0.2",
     contentCreatedAt: new Date().toISOString(),
     project: "赛博记忆公墓",
     case: {
@@ -1257,17 +1294,9 @@ function buildArchivePayload(item, liveArchive, verification) {
       firstSeen,
       lastSeen,
     },
-    verification: {
-      source: verificationSource,
-      verificationState: verification?.verificationState || "demo_fallback",
-      truthScore: verification?.truthScore || item.truthScore,
-      scoreSpread: verification?.scoreSpread ?? null,
-      consensusConfidence: verification?.consensusConfidence || 0,
-      sealEligibility: verification?.sealEligibility || "draft",
-      cacheStatus: verification?.cacheStatus || "not_cached_local_preset",
-      requests: verification?.requests || item.requests.map(normalizePresetRequest),
-      notes: verification?.notes || [],
-    },
+    evidencePackage,
+    evidenceDigest: verification?.evidenceDigest || null,
+    verification: verification?.verificationRecord || presetVerification,
     storage: {
       provider: "pending",
       status: "ready-to-upload",
@@ -1378,7 +1407,7 @@ function renderMemorial(item, liveArchive, verification) {
   const firstSeen = liveArchive?.firstYear || item.firstSeen;
   const lastSeen = liveArchive?.lastYear || item.lastSeen;
   const archiveNote = liveArchive?.source === "wayback" ? "Wayback 实时查询" : "本地演示档案";
-  const truthScore = verification?.truthScore || item.truthScore;
+  const truthScore = CemeteryCore.finiteNumberOr(verification?.truthScore, item.truthScore);
   const requests = verification?.requests || item.requests.map(normalizePresetRequest);
   const verificationSource =
     CemeteryCore.verificationResultCopy(verification);
@@ -1523,6 +1552,7 @@ async function sealCurrentArchive(allowWhileRunning = false) {
   const basePayload =
     state.archivePayloads[item.id] || buildArchivePayload(item, liveArchive, verification);
   state.archivePayloads[item.id] = basePayload;
+  const previousSeal = state.archiveSeals[item.id];
 
   try {
     const response = await fetch("/api/archive/seal", {
@@ -1532,6 +1562,7 @@ async function sealCurrentArchive(allowWhileRunning = false) {
       },
       body: JSON.stringify({
         payload: basePayload,
+        verificationReceipt: verification?.verificationReceipt,
       }),
     });
     const seal = await response.json();
@@ -1545,6 +1576,17 @@ async function sealCurrentArchive(allowWhileRunning = false) {
       sealedAt: new Date().toISOString(),
       errorMessage: error.message,
     });
+  }
+
+  const nextSeal = state.archiveSeals[item.id];
+  if (
+    state.credentials[item.id] &&
+    (!previousSeal ||
+      previousSeal.provider !== nextSeal.provider ||
+      previousSeal.archiveId !== nextSeal.archiveId ||
+      previousSeal.contentHash !== nextSeal.contentHash)
+  ) {
+    delete state.credentials[item.id];
   }
 
   renderMemorial(item, liveArchive, verification);
@@ -1638,7 +1680,11 @@ function generateMemorialCredential(allowWhileRunning = false) {
 
   state.credentials[current.item.id] = CemeteryCore.createCredential(current.item, archiveSeal);
   refreshCurrentMemorial();
-  setAgentState("已生成：纪念凭证");
+  setAgentState(
+    state.credentials[current.item.id].status === "future_claim_compatible"
+      ? "已生成：未来认领兼容凭证"
+      : "已生成：草稿纪念凭证",
+  );
   return true;
 }
 
@@ -1672,7 +1718,7 @@ function downloadCredentialMetadata() {
 
   const metadata = CemeteryCore.createNftReadyMetadata(credential, current.item);
   downloadJsonArtifact(`${credential.id}.metadata.json`, metadata);
-  setAgentState("已下载：链上兼容 metadata");
+  setAgentState("已下载：metadata");
 }
 
 function selectCase(id, updateInput = true, allowWhileRunning = false) {
@@ -1906,29 +1952,21 @@ async function loadEvidencePackage(caseId) {
 }
 
 async function verifyWithGonka(item, liveArchive, evidencePackage) {
-  try {
-    const requestPayload = evidencePackage === undefined
-      ? {
-          case: item,
-          archive: liveArchive,
-          evidencePackage: await loadEvidencePackage(item.id),
-        }
-      : { case: item, archive: liveArchive, evidencePackage };
-    const response = await fetch("/api/gonka/verify", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestPayload),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      return data.fallback || null;
-    }
-    return data;
-  } catch (error) {
-    return null;
-  }
+  const requestPayload = evidencePackage === undefined
+    ? {
+        case: item,
+        archive: liveArchive,
+        evidencePackage: await loadEvidencePackage(item.id),
+      }
+    : { case: item, archive: liveArchive, evidencePackage };
+  const response = await fetch("/api/gonka/verify", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(requestPayload),
+  });
+  return CemeteryCore.readVerificationResponse(response);
 }
 
 async function runAnalysis(event) {
@@ -1944,24 +1982,29 @@ async function runAnalysis(event) {
 
   let liveArchive = null;
   let verification = null;
-  for (let index = 0; index < steps.length; index += 1) {
-    renderSteps(index, index);
-    if (index === 0) {
-      liveArchive = await lookupWayback(inputUrl);
-    } else if (index === 2) {
-      verification = await verifyWithGonka(item, liveArchive);
-    } else {
-      await delay(520);
+  try {
+    for (let index = 0; index < steps.length; index += 1) {
+      renderSteps(index, index);
+      if (index === 0) {
+        liveArchive = await lookupWayback(inputUrl);
+      } else if (index === 2) {
+        verification = await verifyWithGonka(item, liveArchive);
+      } else {
+        await delay(520);
+      }
     }
-  }
 
-  renderSteps(-1, steps.length);
-  activateMuseumTab("exhibit");
-  renderMemorial(item, liveArchive, verification);
-  setAgentState(CemeteryCore.verificationCompletionCopy(verification));
-  state.running = false;
-  renderInteractionLocks();
-  byId("memorial").scrollIntoView({ behavior: "smooth", block: "start" });
+    renderSteps(-1, steps.length);
+    activateMuseumTab("exhibit");
+    renderMemorial(item, liveArchive, verification);
+    setAgentState(CemeteryCore.verificationCompletionCopy(verification));
+    byId("memorial").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (error) {
+    setAgentState(`验证失败：${error.message}`);
+  } finally {
+    state.running = false;
+    renderInteractionLocks();
+  }
 }
 
 function init() {
@@ -1971,6 +2014,21 @@ function init() {
   renderDemoProgress();
   selectCase("xiami");
   byId("analysisForm").addEventListener("submit", runAnalysis);
+  document.querySelector(".museum-tabs")?.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const tabs = [...document.querySelectorAll(".museum-tab[role='tab']")];
+    const currentIndex = tabs.indexOf(document.activeElement);
+    if (currentIndex < 0) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    const nextTab = tabs[nextIndex];
+    activateMuseumTab(nextTab.getAttribute("data-museum-tab"));
+    nextTab.focus();
+  });
   document.querySelectorAll("[data-entry-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const action = button.getAttribute("data-entry-action");

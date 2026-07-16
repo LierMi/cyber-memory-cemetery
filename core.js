@@ -31,17 +31,26 @@
     return `已完成：${verificationResultCopy(verification)}`;
   }
 
+  function finiteNumberOr(value, fallback) {
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  }
+
   function createCredential(item, seal) {
     const compact = String(seal.contentHash).replace(/[^a-zA-Z0-9]/g, "");
+    const archiveCompact = String(seal.archiveId || "unsealed").replace(/[^a-zA-Z0-9]/g, "");
+    const verified =
+      seal.sealEligibility === "verified" &&
+      (seal.verificationState === "live_consensus" || seal.verificationState === "cached_live");
     return {
       schema: "cyber-memory-cemetery/credential/v1",
-      id: `witness-${compact}`,
+      id: `witness-${compact}-${archiveCompact}`,
       name: `Cyber Memory Witness - ${item.name}`,
       caseId: item.id,
       image: item.image,
-      status: "ready_for_onchain_claim",
-      truthScore: seal.truthScore,
+      status: verified ? "future_claim_compatible" : "draft_memorial",
+      truthScore: finiteNumberOr(seal.truthScore, null),
       verificationState: seal.verificationState,
+      sealEligibility: seal.sealEligibility,
       contentHash: seal.contentHash,
       archiveId: seal.archiveId,
       gonkaRequestIds: seal.requestIds || [],
@@ -49,19 +58,121 @@
     };
   }
 
+  function credentialStatusCopy(credential) {
+    if (!credential) return "完成封存后生成纪念凭证和 metadata。";
+    if (credential.status === "future_claim_compatible") {
+      return "凭证已生成，可保留未来认领兼容性；当前没有发生链上铸造。";
+    }
+    return "凭证已生成，是不具备链上认领资格的草稿纪念文件。";
+  }
+
   function createNftReadyMetadata(credential, item) {
+    const verified =
+      credential.status === "future_claim_compatible" &&
+      (credential.verificationState === "live_consensus" ||
+        credential.verificationState === "cached_live");
     return {
       name: credential.name,
-      description: "Future-compatible memorial credential metadata for a verified digital archive.",
+      description: verified
+        ? "Future-compatible memorial credential metadata for a verified digital archive."
+        : "Draft memorial metadata; verification and claim eligibility are not established.",
       image: item.image || credential.image,
       external_url: item.originalUrl || credential.archiveId,
       attributes: [
-        { trait_type: "Claim Status", value: "Pending on-chain claim" },
+        {
+          trait_type: "Claim Status",
+          value: verified ? "Future claim compatible" : "Draft memorial artifact",
+        },
         { trait_type: "Archive Hash", value: credential.contentHash },
         { trait_type: "Verification State", value: credential.verificationState },
         { trait_type: "Truth Score", value: credential.truthScore },
       ],
     };
+  }
+
+  function realRequestId(value) {
+    return (
+      typeof value === "string" &&
+      value.length > 0 &&
+      value !== "gonka_req_unknown" &&
+      !value.startsWith("mock_")
+    );
+  }
+
+  function isValidVerificationResult(result) {
+    if (!result || typeof result !== "object") return false;
+    const state = result.verificationState;
+    if (!["live_consensus", "cached_live", "partial", "demo_fallback"].includes(state)) {
+      return false;
+    }
+    if (!Number.isFinite(result.truthScore)) return false;
+    if (!/^sha256:[a-f0-9]{64}$/.test(result.evidenceDigest || "")) return false;
+    if (
+      !result.evidencePackage ||
+      typeof result.evidencePackage !== "object" ||
+      typeof result.evidencePackage.schema !== "string" ||
+      typeof result.evidencePackage.version !== "string"
+    ) return false;
+    if (
+      !result.verificationRecord ||
+      typeof result.verificationRecord !== "object" ||
+      result.verificationRecord.verificationState !== state
+    ) return false;
+    if (
+      typeof result.verificationReceipt !== "string" ||
+      !result.verificationReceipt.includes(".")
+    ) return false;
+    if (!Array.isArray(result.requests)) return false;
+
+    const successful = result.requests.filter(
+      (request) =>
+        request &&
+        typeof request === "object" &&
+        !request.fallback &&
+        typeof request.model === "string" &&
+        request.model.length > 0 &&
+        realRequestId(request.requestId) &&
+        Number.isFinite(request.truthScore),
+    );
+    const distinctModels = new Set(successful.map((request) => request.model));
+    if (state === "live_consensus" || state === "cached_live") {
+      return successful.length >= 2 && distinctModels.size >= 2;
+    }
+    if (state === "partial") return successful.length === 1;
+    return (
+      result.source === "mock" &&
+      successful.length === 0 &&
+      result.requests.length > 0 &&
+      result.requests.every(
+        (request) =>
+          request &&
+          request.fallback === true &&
+          typeof request.requestId === "string" &&
+          request.requestId.startsWith("mock_"),
+      )
+    );
+  }
+
+  async function readVerificationResponse(response) {
+    let data;
+    try {
+      data = await response.json();
+    } catch (error) {
+      throw new Error("Gonka response contained invalid JSON");
+    }
+    if (response.ok) {
+      if (!isValidVerificationResult(data)) {
+        throw new Error("Gonka returned an invalid verification result");
+      }
+      return data;
+    }
+    if (
+      data?.fallback?.verificationState === "demo_fallback" &&
+      isValidVerificationResult(data.fallback)
+    ) {
+      return data.fallback;
+    }
+    throw new Error(data?.message || data?.error || `Gonka HTTP ${response.status || "error"}`);
   }
 
   function archiveCommunitySummary(actions) {
@@ -217,8 +328,12 @@
     verificationPresentation,
     verificationResultCopy,
     verificationCompletionCopy,
+    finiteNumberOr,
     createCredential,
+    credentialStatusCopy,
     createNftReadyMetadata,
+    isValidVerificationResult,
+    readVerificationResponse,
     archiveCommunitySummary,
     sha256Hex,
     createLocalArchiveSeal,
