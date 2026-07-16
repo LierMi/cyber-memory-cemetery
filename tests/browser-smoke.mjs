@@ -123,6 +123,42 @@ test.beforeEach(async ({ request, page }) => {
   await expect(response.json()).resolves.toMatchObject({ cache: "enabled" });
 });
 
+test("primary case visuals render supplied archival material", async ({ page }) => {
+  await enterCemetery(page);
+
+  const xiamiCardImage = page.locator('[data-case-id="xiami"] .case-art img');
+  await expect(xiamiCardImage).toBeVisible();
+  await expect(xiamiCardImage).toHaveAttribute("src", "./assets/case-xiami-archive.jpg");
+  expect(await xiamiCardImage.evaluate((image) => image.complete && image.naturalWidth > 0)).toBeTruthy();
+
+  const fragments = page.locator(".archive-fragments img");
+  await expect(fragments).toHaveCount(3);
+  await page.locator(".archive-fragments").scrollIntoViewIfNeeded();
+  await expect
+    .poll(() =>
+      fragments.evaluateAll((images) =>
+        images.every((image) => image.complete && image.naturalWidth > 0),
+      ),
+    )
+    .toBeTruthy();
+
+  await page.locator('[data-case-id="renren"]').click();
+  const renrenCardImage = page.locator('[data-case-id="renren"] .case-art img');
+  await expect(renrenCardImage).toHaveAttribute("src", "./assets/case-renren-archive.webp");
+  await expect(fragments).toHaveCount(3);
+
+  const secondaryCases = [
+    ["netease-blog", "./assets/case-netease-blog-archive.jpeg"],
+    ["tianya", "./assets/case-tianya-archive.jpeg"],
+    ["mop", "./assets/case-mop-archive.jpeg"],
+  ];
+  for (const [caseId, src] of secondaryCases) {
+    const image = page.locator(`[data-case-id="${caseId}"] .case-art img`);
+    await expect(image).toHaveAttribute("src", src);
+    expect(await image.evaluate((element) => element.complete && element.naturalWidth > 0)).toBeTruthy();
+  }
+});
+
 test("Xiami presentation reaches a sealed credential", async ({ page }, testInfo) => {
   await page.goto("http://127.0.0.1:5177/");
   await page.getByRole("button", { name: "进入公墓" }).click();

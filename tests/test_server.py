@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,43 @@ import server
 from server import build_council_prompt, format_evidence_package, normalize_evidence_package
 from verification_cache import VerificationCache
 from verification_trust import VerificationTrust
+
+
+class DeploymentConfigurationTests(unittest.TestCase):
+    def test_serverless_receipts_use_the_configured_signing_secret(self):
+        with patch.dict(
+            os.environ,
+            {"VERCEL": "1", "VERIFICATION_SIGNING_SECRET": "stable-vercel-secret"},
+            clear=False,
+        ):
+            self.assertEqual(
+                server.verification_signing_secret(),
+                b"stable-vercel-secret",
+            )
+
+    def test_serverless_deployment_requires_a_signing_secret(self):
+        with patch.dict(os.environ, {"VERCEL": "1"}, clear=False):
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("VERIFICATION_SIGNING_SECRET", None)
+                with self.assertRaisesRegex(RuntimeError, "VERIFICATION_SIGNING_SECRET"):
+                    server.verification_signing_secret()
+
+    def test_serverless_cache_uses_the_writable_tmp_directory(self):
+        with patch.dict(os.environ, {"VERCEL": "1"}, clear=False):
+            os.environ.pop("VERIFICATION_CACHE_DIR", None)
+            self.assertEqual(
+                server.verification_cache_directory(),
+                "/tmp/cyber-memory-cemetery-cache",
+            )
+
+    def test_vercel_python_routes_expose_the_existing_handler(self):
+        from api.archive.seal import handler as archive_handler
+        from api.gonka.verify import handler as verify_handler
+        from api.status import handler as status_handler
+
+        self.assertIs(status_handler, server.Handler)
+        self.assertIs(verify_handler, server.Handler)
+        self.assertIs(archive_handler, server.Handler)
 
 
 class ArchiveSealTests(unittest.TestCase):

@@ -52,7 +52,24 @@ const cases = [
     lastSeen: "2024",
     truthScore: 91,
     certainty: "高",
-    image: "./assets/case-renren.png",
+    image: "./assets/case-renren-archive.webp",
+    gallery: [
+      {
+        src: "./assets/evidence-renren-return.png",
+        alt: "人人网同学关系导向的登录页面",
+        caption: "回归登录页 / 同学关系入口",
+      },
+      {
+        src: "./assets/evidence-renren-login.png",
+        alt: "人人网旧登录首页和平台标志",
+        caption: "旧登录首页 / renren.com",
+      },
+      {
+        src: "./assets/evidence-renren-evolution.jpeg",
+        alt: "校内网与人人网的品牌名称变迁",
+        caption: "校内网到人人网 / 品牌变迁",
+      },
+    ],
     tags: ["相册", "日志", "留言板", "校园实名社交"],
     summary:
       "人人网的前身校内网曾是中国校园实名社交的重要入口，承载相册、日志、留言板和大学关系链。2024 年 12 月服务暂停后，它从社交平台变成一处需要被考古的数字遗址。",
@@ -172,7 +189,24 @@ const cases = [
     lastSeen: "2021",
     truthScore: 93,
     certainty: "高",
-    image: "./assets/case-xiami.png",
+    image: "./assets/case-xiami-archive.jpg",
+    gallery: [
+      {
+        src: "./assets/evidence-xiami-cassette.jpeg",
+        alt: "虾米音乐磁带播放器与多款皮肤界面",
+        caption: "磁带播放器 / 皮肤与个性化",
+      },
+      {
+        src: "./assets/evidence-xiami-splash.webp",
+        alt: "虾米音乐橙色移动端启动页",
+        caption: "移动端启动页 / 因你而悦",
+      },
+      {
+        src: "./assets/evidence-xiami-player.png",
+        alt: "虾米音乐黑胶唱片风格的播放界面",
+        caption: "黑胶播放页 / 收藏与评论入口",
+      },
+    ],
     tags: ["独立音乐", "乐评", "精选集", "音乐人平台"],
     summary:
       "虾米音乐曾是中文互联网独立音乐和乐评文化的重要栖息地，承载精选集、音乐人主页、长乐评和听歌关系链。2021 年停止服务后，大量用户歌单、评论和个人收藏入口从公开互联网中消失。",
@@ -309,7 +343,7 @@ const cases = [
     lastSeen: "2018",
     truthScore: 92,
     certainty: "高",
-    image: "./assets/case-netease-blog.png",
+    image: "./assets/case-netease-blog-archive.jpeg",
     tags: ["长文", "日记", "个人主页"],
     summary:
       "网易博客曾是中文个人写作的重要平台。大量网络日记、影评、旅行记录和私人长文依托它存在，关停后迁移成本极高。",
@@ -337,7 +371,7 @@ const cases = [
     lastSeen: "2024",
     truthScore: 86,
     certainty: "中高",
-    image: "./assets/case-tianya.png",
+    image: "./assets/case-tianya-archive.jpeg",
     tags: ["长帖", "公共讨论", "神贴"],
     summary:
       "天涯社区曾是中文互联网公共讨论场之一，长帖、神贴、社会观察和民间叙事沉淀丰富。近年访问不稳定，让数字遗产保护问题变得具体。",
@@ -365,7 +399,7 @@ const cases = [
     lastSeen: "2021",
     truthScore: 84,
     certainty: "中",
-    image: "./assets/case-mop.png",
+    image: "./assets/case-mop-archive.jpeg",
     tags: ["论坛", "亚文化", "网络梗"],
     summary:
       "猫扑网是早期中文论坛文化的重要节点，承载网络梗、亚文化和社区互动。发帖功能关闭后，它更像一片可被参观的早期互联网遗址。",
@@ -1401,6 +1435,34 @@ function renderSteps(activeIndex = -1, doneCount = 0) {
     .join("");
 }
 
+function renderArchiveFragments(item) {
+  const fragments = Array.isArray(item.gallery) ? item.gallery : [];
+  if (!fragments.length) return "";
+
+  return `
+    <section class="archive-fragments-section" aria-labelledby="archiveFragmentsTitle">
+      <div class="archive-fragments-heading">
+        <h4 id="archiveFragmentsTitle">档案碎片</h4>
+        <span>PUBLIC WEB ARTIFACTS / 03</span>
+      </div>
+      <div class="archive-fragments">
+        ${fragments
+          .map(
+            (fragment) => `
+              <figure class="archive-fragment">
+                <div class="archive-fragment-media">
+                  <img src="${fragment.src}" alt="${fragment.alt}" width="720" height="540" loading="lazy" />
+                </div>
+                <figcaption>${fragment.caption}</figcaption>
+              </figure>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderMemorial(item, liveArchive, verification) {
   const detail = byId("memorialDetail");
   state.currentMemorial = { item, liveArchive, verification };
@@ -1432,6 +1494,7 @@ function renderMemorial(item, liveArchive, verification) {
         ${createTag(item.originalUrl)}
       </div>
       <blockquote class="epitaph">${item.epitaph}</blockquote>
+      ${renderArchiveFragments(item)}
       <div class="truth-score">
         <div>
           <strong>${truthScore}</strong>

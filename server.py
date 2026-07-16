@@ -35,7 +35,26 @@ def load_dotenv(path=".env"):
 
 load_dotenv()
 
-GONKA_BASE_URL = os.getenv("GONKA_BASE_URL", "https://api.gonkascan.com/v1").rstrip("/")
+
+def verification_signing_secret():
+    value = os.getenv("VERIFICATION_SIGNING_SECRET", "").strip()
+    if value:
+        return value.encode("utf-8")
+    if os.getenv("VERCEL"):
+        raise RuntimeError("VERIFICATION_SIGNING_SECRET is required on Vercel")
+    return None
+
+
+def verification_cache_directory():
+    configured = os.getenv("VERIFICATION_CACHE_DIR", "").strip()
+    if configured:
+        return configured
+    if os.getenv("VERCEL"):
+        return "/tmp/cyber-memory-cemetery-cache"
+    return "tmp/cache"
+
+
+GONKA_BASE_URL = os.getenv("GONKA_BASE_URL", "https://api.gonkarouter.io/v1").rstrip("/")
 GONKA_API_KEY = os.getenv("GONKA_API_KEY", "")
 GONKA_MODEL = os.getenv("GONKA_MODEL", "deepseek-ai/DeepSeek-V3")
 GONKA_ARCHAEOLOGIST_MODEL = os.getenv("GONKA_ARCHAEOLOGIST_MODEL", "auto")
@@ -45,7 +64,7 @@ GONKA_MODEL_PREFERENCE = os.getenv(
     "MiniMaxAI/MiniMax-M2.7,moonshotai/Kimi-K2.6",
 )
 GONKA_TIMEOUT_SECONDS = int(os.getenv("GONKA_TIMEOUT_SECONDS", "35"))
-GONKA_MAX_TOKENS = int(os.getenv("GONKA_MAX_TOKENS", "180"))
+GONKA_MAX_TOKENS = int(os.getenv("GONKA_MAX_TOKENS", "1024"))
 PINATA_JWT = os.getenv("PINATA_JWT", "")
 PINATA_PIN_JSON_URL = os.getenv(
     "PINATA_PIN_JSON_URL",
@@ -53,14 +72,17 @@ PINATA_PIN_JSON_URL = os.getenv(
 )
 PINATA_GATEWAY_URL = os.getenv("PINATA_GATEWAY_URL", "https://gateway.pinata.cloud/ipfs/")
 MODEL_CACHE = None
-VERIFICATION_CACHE = VerificationCache("tmp/cache")
+VERIFICATION_CACHE = VerificationCache(verification_cache_directory())
 VERIFICATION_CACHE_TTL_SECONDS = max(
     1, int(os.getenv("VERIFICATION_CACHE_TTL_SECONDS", "3600"))
 )
 VERIFICATION_RECEIPT_TTL_SECONDS = max(
     1, int(os.getenv("VERIFICATION_RECEIPT_TTL_SECONDS", "900"))
 )
-VERIFICATION_TRUST = VerificationTrust(receipt_ttl_seconds=VERIFICATION_RECEIPT_TTL_SECONDS)
+VERIFICATION_TRUST = VerificationTrust(
+    secret=verification_signing_secret(),
+    receipt_ttl_seconds=VERIFICATION_RECEIPT_TTL_SECONDS,
+)
 MAX_ARCHIVE_REQUEST_BYTES = 512 * 1024
 ARCHIVE_SEAL_RESULTS = {}
 ARCHIVE_SEAL_LOCK = threading.Lock()

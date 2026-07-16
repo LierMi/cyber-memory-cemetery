@@ -14,8 +14,14 @@ services:
       - key: GONKA_API_KEY
         sync: false
       - key: GONKA_BASE_URL
-        value: https://api.gonkascan.com/v1
+        value: https://api.gonkarouter.io/v1
       - key: GONKA_MODEL
         value: auto
+      - key: GONKA_ARCHAEOLOGIST_MODEL
+        value: MiniMaxAI/MiniMax-M2.7
+      - key: GONKA_VERIFIER_MODEL
+        value: moonshotai/Kimi-K2.6
+      - key: GONKA_MAX_TOKENS
+        value: 1024
       - key: PINATA_JWT
         sync: false

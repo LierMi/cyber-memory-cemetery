@@ -1819,7 +1819,22 @@ h3 {
 }
 
 .case-art {
-  display: none;
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #08070a;
+}
+
+.case-art img {
+  filter: grayscale(0.38) sepia(0.12) saturate(0.78) brightness(0.78);
+  transition: filter 180ms ease, transform 240ms ease;
+}
+
+.case-card:hover .case-art img,
+.case-card:focus-visible .case-art img,
+.case-card.active .case-art img {
+  filter: grayscale(0.12) sepia(0.06) saturate(0.94) brightness(0.88);
+  transform: scale(1.015);
 }
 
 .case-body {
@@ -1928,6 +1943,76 @@ h3 {
   background: rgba(255, 255, 255, 0.025);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(8px);
+}
+
+.archive-fragments-section {
+  margin: 26px 0 30px;
+}
+
+.archive-fragments-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 10px;
+}
+
+.archive-fragments-heading h4 {
+  margin: 0;
+  color: var(--accent-strong);
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.archive-fragments-heading span {
+  color: rgba(196, 136, 42, 0.58);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+
+.archive-fragments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid rgba(196, 136, 42, 0.16);
+  border-bottom: 1px solid rgba(196, 136, 42, 0.16);
+}
+
+.archive-fragment {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+}
+
+.archive-fragment + .archive-fragment {
+  border-left: 1px solid rgba(196, 136, 42, 0.12);
+}
+
+.archive-fragment-media {
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: #08070a;
+}
+
+.archive-fragment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: grayscale(0.42) sepia(0.13) saturate(0.76) brightness(0.76);
+  transition: filter 180ms ease;
+}
+
+.archive-fragment:hover img {
+  filter: grayscale(0.08) sepia(0.04) saturate(0.95) brightness(0.88);
+}
+
+.archive-fragment figcaption {
+  margin-top: 10px;
+  color: rgba(216, 205, 188, 0.55);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.6;
 }
 
 .truth-score {
@@ -2861,5 +2946,20 @@ textarea {
 
   .detail-pane {
     padding: 18px;
+  }
+
+  .archive-fragments-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .archive-fragments {
+    grid-template-columns: 1fr;
+  }
+
+  .archive-fragment + .archive-fragment {
+    border-top: 1px solid rgba(196, 136, 42, 0.12);
+    border-left: 0;
   }
 }

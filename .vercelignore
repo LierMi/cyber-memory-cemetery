@@ -1,0 +1,11 @@
+.env
+.git
+.worktrees
+.vercel
+node_modules
+playwright-report
+test-results
+tests
+tmp
+Pocket_Republic_*
+pocket-republic
