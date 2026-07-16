@@ -532,3 +532,23 @@ test("preset provenance and roadmap copy remain explicitly non-live", () => {
   assert.match(appSource, /mock_preset_/);
   assert.doesNotMatch(htmlSource, /Demo 视频/);
 });
+
+test("historical Gonka record preserves two distinct real request IDs", () => {
+  const payload = JSON.parse(fs.readFileSync("data/gonka-verified-runs.json", "utf8"));
+  const record = payload.records.xiami;
+
+  assert.equal(record.provider, "Gonka Router");
+  assert.equal(record.verificationState, "live_consensus");
+  assert.equal(record.verifiedAt, "2026-07-16");
+  assert.equal(record.requests.length, 2);
+  assert.equal(new Set(record.requests.map((request) => request.model)).size, 2);
+  assert.equal(new Set(record.requests.map((request) => request.requestId)).size, 2);
+  record.requests.forEach((request) => {
+    assert.equal(typeof request.truthScore, "number");
+    assert.match(request.requestId, /^devshard-/);
+    assert.doesNotMatch(request.requestId, /^mock_/);
+  });
+  assert.equal(record.truthScore, 82);
+  assert.equal(record.consensusConfidence, 86);
+  assert.match(record.evidenceDigest, /^sha256:[a-f0-9]{64}$/);
+});

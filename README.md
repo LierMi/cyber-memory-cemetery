@@ -2,6 +2,8 @@
 
 赛博记忆公墓是一个 Gonka-first 黑客松应用。它以虾米音乐为主案例，整理公开的 Web2 遗址证据，调用 Gonka Router 的两个不同模型进行交叉验证，并生成 Truth Score、分数差、共识置信度、Request ID、可验证档案和可下载的纪念凭证。
 
+虾米展品默认展示一份标注为“历史真实调用”的 Gonka 验证记录，包含两款模型、独立评分、两个真实 Request ID、聚合分数和证据 digest。该记录用于赛道审计，不会被描述为当前页面加载产生的新请求；当前实时会诊状态仍在下方独立展示。
+
 线上 Demo：[https://cyber-memory-cemetery.vercel.app](https://cyber-memory-cemetery.vercel.app)
 
 这是一个原生 HTML、CSS、JavaScript 前端和 Python 本地代理组成的 MVP。前端不持有 Gonka 或 Pinata 密钥。
@@ -78,11 +80,12 @@ python3 server.py
 ## 一键虾米流程
 
 1. 点击「进入公墓」。
-2. 在「调查控制台」点击「一键演示」。
-3. 流程自动选择虾米音乐，收集公开证据，并请求两个 Gonka 模型。
-4. 检查状态标签、模型名、Request ID、Truth Score、分数差和共识置信度。
-5. 流程自动封存当前验证 payload。未配置 Pinata 时应显示本地封存和 SHA-256，不应显示 CID。
-6. 生成并下载纪念凭证或 NFT-ready metadata。这些都是文件，不是链上铸造记录。
+2. 在虾米 Truth Score 下方查看默认可见的“历史真实调用”记录及两个真实 Gonka Request ID。
+3. 在「调查控制台」点击「一键演示」。
+4. 流程自动选择虾米音乐，收集公开证据，并请求两个 Gonka 模型。
+5. 检查当前会诊的状态标签、模型名、Request ID、Truth Score、分数差和共识置信度。
+6. 流程自动封存当前验证 payload。未配置 Pinata 时应显示本地封存和 SHA-256，不应显示 CID。
+7. 生成并下载纪念凭证或 NFT-ready metadata。这些都是文件，不是链上铸造记录。
 
 ## API 与状态端点
 

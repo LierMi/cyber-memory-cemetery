@@ -38,6 +38,8 @@ const defaultRelics = [
 
 const evidencePackages = new Map();
 const evidencePackagePromises = new Map();
+const historicalGonkaRecords = new Map();
+let historicalGonkaRecordsPromise = null;
 
 const cases = [
   {
@@ -730,6 +732,55 @@ function renderModelCouncil(requests = []) {
           })
           .join("")}
       </div>
+    </section>
+  `;
+}
+
+function renderHistoricalGonkaRecord(item) {
+  const record = historicalGonkaRecords.get(item.id);
+  if (!record || !Array.isArray(record.requests) || record.requests.length !== 2) return "";
+
+  return `
+    <section class="historical-gonka-record" aria-label="已验证的 Gonka 历史会诊" data-historical-gonka-record>
+      <header class="historical-gonka-header">
+        <div>
+          <span>Gonka Verified Record</span>
+          <h4>已验证的 Gonka 专家会诊</h4>
+        </div>
+        <strong>历史真实调用</strong>
+      </header>
+      <p class="historical-gonka-intro">
+        ${escapeHtml(record.verifiedAt)} 通过 ${escapeHtml(record.provider)} 完成双模型交叉验证，以下 Request ID 来自模型接口的真实响应。
+      </p>
+      <dl class="historical-gonka-metrics">
+        <div><dt>Truth Score</dt><dd>${escapeHtml(record.truthScore)}</dd></div>
+        <div><dt>共识置信度</dt><dd>${escapeHtml(record.consensusConfidence)}%</dd></div>
+        <div><dt>模型评分差</dt><dd>${escapeHtml(record.scoreSpread)}</dd></div>
+        <div><dt>验证状态</dt><dd>LIVE CONSENSUS</dd></div>
+      </dl>
+      <div class="historical-gonka-models">
+        ${record.requests
+          .map(
+            (request) => `
+              <article class="historical-gonka-model">
+                <div>
+                  <span>${escapeHtml(request.roleLabel || request.role)}</span>
+                  <b>${escapeHtml(request.truthScore)}</b>
+                </div>
+                <strong>${escapeHtml(request.model)}</strong>
+                <code data-historical-request-id>Request ID: ${escapeHtml(request.requestId)}</code>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+      <div class="historical-gonka-proof">
+        <span>Evidence Digest</span>
+        <code>${escapeHtml(record.evidenceDigest)}</code>
+      </div>
+      <p class="historical-gonka-disclosure">
+        这是已完成的历史真实调用记录，不代表本次页面加载新请求。点击“一键演示”会单独发起或刷新当前会诊。
+      </p>
     </section>
   `;
 }
@@ -1509,6 +1560,7 @@ function renderMemorial(item, liveArchive, verification) {
           <span>实时模型共识</span>
         </div>
       </div>
+      ${renderHistoricalGonkaRecord(item)}
       <div class="verification-summary-grid">
         ${renderVerificationState(verification)}
         ${renderConsensusMeter(verification)}
@@ -2041,6 +2093,27 @@ async function loadEvidencePackage(caseId) {
   }
 }
 
+async function loadHistoricalGonkaRecords() {
+  if (historicalGonkaRecords.size) return historicalGonkaRecords;
+  if (historicalGonkaRecordsPromise) return historicalGonkaRecordsPromise;
+
+  historicalGonkaRecordsPromise = (async () => {
+    const response = await fetch("./data/gonka-verified-runs.json");
+    if (!response.ok) throw new Error(`Historical Gonka record HTTP ${response.status}`);
+    const payload = await response.json();
+    Object.entries(payload.records || {}).forEach(([caseId, record]) => {
+      historicalGonkaRecords.set(caseId, record);
+    });
+    return historicalGonkaRecords;
+  })();
+
+  try {
+    return await historicalGonkaRecordsPromise;
+  } finally {
+    historicalGonkaRecordsPromise = null;
+  }
+}
+
 async function verifyWithGonka(item, liveArchive, evidencePackage) {
   const requestPayload = evidencePackage === undefined
     ? {
@@ -2103,6 +2176,11 @@ function init() {
   renderSteps();
   renderDemoProgress();
   selectCase("xiami");
+  loadHistoricalGonkaRecords()
+    .then(() => {
+      if (state.currentMemorial?.item.id === "xiami") refreshCurrentMemorial();
+    })
+    .catch(() => {});
   byId("analysisForm").addEventListener("submit", runAnalysis);
   document.querySelector(".museum-tabs")?.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;

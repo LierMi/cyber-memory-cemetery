@@ -1,7 +1,7 @@
 # Gonka Submission Checklist
 
 - [x] Live Gonka Router call returns two different model names
-- [x] Both model Request IDs are visible
+- [x] Both real model Request IDs are visible by default in the Xiami exhibit
 - [x] Verification response includes evidence digest and a server-issued receipt
 - [x] Cache recovery enforces evidence/version/model compatibility and TTL
 - [x] Truth Score, score spread, and consensus confidence are visible
@@ -41,3 +41,4 @@ The 2026-07-16 strict live probe completed as `live_consensus` through `https://
 - `moonshotai/Kimi-K2.6`: Request ID `devshard-30420-203`, Truth Score 88.
 - Aggregated Truth Score 82, score spread 13, consensus confidence 86.
 - Evidence digest `sha256:dd3863d09bd4ab8b600a724d0cbccc82ccb22967e6db87eba5f92ba75f8fa9a9`.
+- The Xiami exhibit renders this immutable record from `data/gonka-verified-runs.json` before any new live demo call, with an explicit historical-call disclosure.
