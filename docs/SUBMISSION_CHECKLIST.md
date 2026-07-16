@@ -13,11 +13,11 @@
 - [x] Memorial credential downloads successfully
 - [x] GitHub README contains setup and verification commands
 - [x] Browser suite stubs Wayback, Gonka, and archive upload paths
-- [ ] Public deployment URL is recorded before submission
+- [x] Public deployment URL is recorded before submission
 
 ## Verification policy
 
-An item is checked only after Task 8 verifies it directly. A `cached_live`, `partial`, or demo result does not satisfy the live Gonka items. A `local-sealed` receipt does not satisfy the IPFS CID item. The public deployment URL remains unchecked until a real deployed service is available.
+An item is checked only after Task 8 verifies it directly. A `cached_live`, `partial`, or demo result does not satisfy the live Gonka items. A `local-sealed` receipt does not satisfy the IPFS CID item.
 
 Before `npm run test:browser`, stop any manually running server on port 5177. Playwright intentionally uses `reuseExistingServer: false`. Verification receipts default to a 900-second TTL, compatible live-cache records default to 3600 seconds, and both limits may be overridden with the documented environment variables.
 
@@ -25,7 +25,13 @@ Before `npm run test:browser`, stop any manually running server on port 5177. Pl
 
 - Public evidence links: four unique curated URLs returned HTTP 200, but the People.cn source returned a network `URLError` during the Task 8 probe.
 - IPFS CID: `PINATA_JWT` is not configured, so only the verified `local-sealed` path is available. No CID was fabricated.
-- Public deployment URL: no public Render or GitHub deployment credential is available in this worktree.
+
+## Public deployment
+
+- Vercel URL: `https://cyber-memory-cemetery.vercel.app`
+- Production smoke test: homepage, supplied Xiami asset, and `/api/status` returned HTTP 200.
+- Cross-function probe: `/api/gonka/verify` issued a signed receipt and `/api/archive/seal` verified it in a separate Python Function, returning a SHA-256 `local-sealed` receipt.
+- The deployment reports `gonka: live` and `ipfs: local_only`. A production probe during Gonka rate limiting was honestly labeled `partial` and remained draft-only.
 
 ## Live Gonka verification
 

@@ -2,6 +2,8 @@
 
 赛博记忆公墓是一个 Gonka-first 黑客松应用。它以虾米音乐为主案例，整理公开的 Web2 遗址证据，调用 Gonka Router 的两个不同模型进行交叉验证，并生成 Truth Score、分数差、共识置信度、Request ID、可验证档案和可下载的纪念凭证。
 
+线上 Demo：[https://cyber-memory-cemetery.vercel.app](https://cyber-memory-cemetery.vercel.app)
+
 这是一个原生 HTML、CSS、JavaScript 前端和 Python 本地代理组成的 MVP。前端不持有 Gonka 或 Pinata 密钥。
 
 ## 事实状态
@@ -125,7 +127,7 @@ npm run test:browser
 - 必需秘密环境变量：`GONKA_API_KEY`
 - 可选秘密环境变量：`PINATA_JWT`
 
-在 Render 创建 Blueprint 后，需要在服务设置中填入秘密值。本仓库不包含公开部署凭证或已部署 URL，因此提交清单中的公开 URL 项保持未勾选。
+在 Render 创建 Blueprint 后，需要在服务设置中填入秘密值。当前公开版本部署在 Vercel，Render 配置保留为备用部署方式。
 
 ## Vercel 部署配置
 
