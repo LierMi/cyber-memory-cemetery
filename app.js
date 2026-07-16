@@ -927,25 +927,6 @@ function compactHash(value, head = 14, tail = 8) {
 }
 
 
-function archiveReadinessFor(item, archiveSeal, requests) {
-  const evidenceCount = publicEvidenceClaims(item).length;
-  const credential = state.credentials[item.id];
-  const permanent = CemeteryCore.isPermanentArchiveReceipt(archiveSeal);
-  const liveConsensus = CemeteryCore.hasLiveModelConsensus(requests);
-  const values = {
-    公开证据: `${evidenceCount} 条公开摘要`,
-    模型会诊: liveConsensus ? `${requests.length} 个真实且唯一的 Request ID` : "未达成实时双模型共识",
-    永久封存: permanent ? archiveSeal.archiveId : archiveSeal ? "本地封存，待上传 IPFS" : "待上传 IPFS",
-    纪念凭证: credential ? credential.id : "待生成",
-  };
-  return CemeteryCore.archiveReadiness({
-    evidenceCount,
-    requests,
-    archiveSeal,
-    credential,
-  }).map((entry) => ({ ...entry, value: values[entry.label] }));
-}
-
 function renderTombstoneCraftPanel(item, archiveSeal) {
   const actions = getActions(item.id);
   const credential = state.credentials[item.id];
@@ -1066,35 +1047,6 @@ function renderProofChainBoard(item, archiveSeal, requests, verificationSource) 
           )
           .join("")}
       </ol>
-    </section>
-  `;
-}
-
-function renderArchiveReadinessPanel(item, archiveSeal, requests) {
-  const readiness = archiveReadinessFor(item, archiveSeal, requests);
-  const readyCount = readiness.filter((entry) => entry.ready).length;
-  return `
-    <section class="readiness-panel" aria-label="档案就绪清单">
-      <div class="proof-board-head">
-        <div>
-          <span>Archive Readiness</span>
-          <strong>${readyCount}/${readiness.length} 项已就绪</strong>
-        </div>
-        <code>seal checklist</code>
-      </div>
-      <div class="readiness-grid">
-        ${readiness
-          .map(
-            (entry) => `
-              <article class="${entry.ready ? "ready" : "pending"}">
-                <span>${entry.ready ? "READY" : "PENDING"}</span>
-                <strong>${escapeHtml(entry.label)}</strong>
-                <p>${escapeHtml(entry.value)}</p>
-              </article>
-            `,
-          )
-          .join("")}
-      </div>
     </section>
   `;
 }
@@ -1245,11 +1197,6 @@ function renderArchiveWorkbench(item, archiveSeal) {
       archiveSeal,
       state.currentMemorial?.verification?.requests || item.requests.map(normalizePresetRequest),
       CemeteryCore.verificationResultCopy(state.currentMemorial?.verification),
-    )}
-    ${renderArchiveReadinessPanel(
-      item,
-      archiveSeal,
-      state.currentMemorial?.verification?.requests || item.requests.map(normalizePresetRequest),
     )}
   `;
 }

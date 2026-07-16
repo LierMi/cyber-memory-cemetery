@@ -2110,11 +2110,21 @@ h3 {
   color: rgba(196, 136, 42, 0.72);
 }
 
-.lab-panel,
-.roadmap {
+.lab-panel {
   grid-template-columns: minmax(280px, 0.82fr) minmax(340px, 1fr);
   gap: 16px;
   align-items: start;
+}
+
+.roadmap {
+  grid-template-columns: 1fr;
+  gap: 28px;
+  align-items: stretch;
+}
+
+.roadmap-build-heading {
+  margin-top: 8px;
+  margin-bottom: 0;
 }
 
 .lab-form,
