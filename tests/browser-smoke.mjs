@@ -67,20 +67,27 @@ function archiveResult(payload, provider = "local-sealed") {
   const contentHash = `sha256:${"c".repeat(64)}`;
   const archiveId = permanent ? "ipfs://bafy-browser-test" : `local://sha256/${"c".repeat(64)}`;
   const requestIds = (payload.verification?.requests || []).map((request) => request.requestId);
-  return {
+  const receipt = {
     provider,
     status: permanent ? "uploaded" : "sealed-local",
     contentHash,
     archiveId,
-    gatewayUrl: permanent ? "https://gateway.example/ipfs/bafy-browser-test" : "",
     sealEligibility: payload.verification?.sealEligibility || "draft",
+  };
+  return {
+    ...receipt,
+    gatewayUrl: permanent ? "https://gateway.example/ipfs/bafy-browser-test" : "",
     contentCreatedAt: payload.contentCreatedAt,
     verificationState: payload.verification?.verificationState || "demo_fallback",
     truthScore: payload.verification?.truthScore,
     requestIds,
     filename: "cyber-memory-xiami-browser.json",
-    json: JSON.stringify({ archive: payload }),
-    previewJson: JSON.stringify({ contentHash, archiveId }),
+    json: JSON.stringify({
+      schema: "cyber-memory-cemetery/sealed/v0.2",
+      archive: payload,
+      receipt,
+    }),
+    previewJson: JSON.stringify({ ...receipt }),
     notes: [],
   };
 }
@@ -476,10 +483,93 @@ test("explicit archive rejection stops without creating a local seal", async ({ 
   await enterCemetery(page);
   await page.getByRole("button", { name: "一键演示" }).click();
 
-  await expect(page.locator('[data-demo-step="4"]')).toHaveAttribute("data-status", "failed");
+  await expect(page.locator('[data-demo-step="3"]')).toHaveAttribute("data-status", "failed");
   await expect(page.locator("[data-demo-summary]")).toContainText(/receipt rejected/i);
   await expect(page.locator(".archive-list")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "下载纪念凭证" })).toHaveCount(0);
+});
+
+test("malformed archive success cannot complete sealing or generate a credential", async ({ page }) => {
+  await page.route("**/api/archive/seal", (route) => route.fulfill({ status: 200, json: {} }));
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+
+  await expect(page.locator('[data-demo-step="4"]')).toHaveAttribute("data-status", "failed");
+  await expect(page.locator("[data-demo-summary]")).toContainText(/invalid archive seal receipt/i);
+  await expect(page.locator(".archive-list")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "下载纪念凭证" })).toHaveCount(0);
+});
+
+test("receipt rejection rolls the demo back for fresh verification before sealing", async ({ page }) => {
+  let verificationCalls = 0;
+  const archiveRequests = [];
+  await page.route("**/api/gonka/verify", async (route) => {
+    verificationCalls += 1;
+    const prefix = verificationCalls === 1 ? "expired" : "fresh";
+    const result = verificationResult([`${prefix}-request-a`, `${prefix}-request-b`]);
+    result.verificationReceipt = `${prefix}-payload.${prefix}-signature`;
+    await route.fulfill({ json: result });
+  });
+  await page.route("**/api/archive/seal", async (route) => {
+    const request = route.request().postDataJSON();
+    archiveRequests.push(request);
+    if (archiveRequests.length === 1) {
+      await route.fulfill({
+        status: 400,
+        json: { type: "verification_receipt_expired", error: "Verification receipt expired" },
+      });
+      return;
+    }
+    await route.fulfill({ json: archiveResult(request.payload) });
+  });
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+  await expect(page.locator('[data-demo-step="3"]')).toHaveAttribute("data-status", "failed");
+  expect(verificationCalls).toBe(1);
+  expect(archiveRequests).toHaveLength(1);
+
+  await page.getByRole("button", { name: "从失败步骤重试" }).click();
+  await expectDemoComplete(page);
+  expect(verificationCalls).toBe(2);
+  expect(archiveRequests).toHaveLength(2);
+  expect(archiveRequests[0].verificationReceipt).not.toBe(archiveRequests[1].verificationReceipt);
+  expect(archiveRequests[1].payload.verification.requests.map((request) => request.requestId)).toEqual([
+    "fresh-request-a",
+    "fresh-request-b",
+  ]);
+});
+
+test("transient archive failure retries sealing with the same verified payload", async ({ page }) => {
+  let verificationCalls = 0;
+  const archiveRequests = [];
+  await page.route("**/api/gonka/verify", async (route) => {
+    verificationCalls += 1;
+    await route.fulfill({ json: verificationResult(["stable-request-a", "stable-request-b"]) });
+  });
+  await page.route("**/api/archive/seal", async (route) => {
+    const request = route.request().postDataJSON();
+    archiveRequests.push(request);
+    if (archiveRequests.length === 1) {
+      await route.fulfill({
+        status: 502,
+        json: { type: "archive_unavailable", error: "Archive service unavailable" },
+      });
+      return;
+    }
+    await route.fulfill({ json: archiveResult(request.payload) });
+  });
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+  await expect(page.locator('[data-demo-step="4"]')).toHaveAttribute("data-status", "failed");
+
+  await page.getByRole("button", { name: "从失败步骤重试" }).click();
+  await expectDemoComplete(page);
+  expect(verificationCalls).toBe(1);
+  expect(archiveRequests).toHaveLength(2);
+  expect(archiveRequests[1]).toEqual(archiveRequests[0]);
 });
 
 test("archive transport failure alone creates the browser-local fallback", async ({ page }) => {
@@ -534,6 +624,37 @@ test("local-to-IPFS promotion invalidates and regenerates the credential", async
 
   await expect(credentialCode).not.toHaveText(localCredentialId);
   expect(await credentialCode.textContent()).toContain("ipfsbafybrowsertest");
+});
+
+test("failed local-to-IPFS promotion preserves the local seal and credential", async ({ page }) => {
+  let archiveCalls = 0;
+  await page.route("**/api/archive/seal", async (route) => {
+    archiveCalls += 1;
+    const payload = route.request().postDataJSON().payload;
+    if (archiveCalls === 1) {
+      await route.fulfill({ json: archiveResult(payload, "local-sealed") });
+      return;
+    }
+    await route.fulfill({
+      status: 403,
+      json: { type: "verification_receipt_rejected", error: "Verification receipt rejected" },
+    });
+  });
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+  await expectDemoComplete(page);
+  const credentialCode = page.locator(".credential-preview code").first();
+  const localCredentialId = await credentialCode.textContent();
+  const localArchive = await page.locator(".archive-list").first().innerText();
+
+  await page.getByRole("button", { name: "重新上传 IPFS" }).first().click();
+
+  await expect(page.locator("#agentState")).toContainText("封存被拒绝");
+  await expect(page.locator(".archive-list").first()).toHaveText(localArchive);
+  await expect(credentialCode).toHaveText(localCredentialId);
+  await expect(page.getByRole("button", { name: "下载纪念凭证" }).first()).toBeVisible();
+  expect(archiveCalls).toBe(2);
 });
 
 test("museum tabs expose complete semantics and update selection", async ({ page }) => {

@@ -197,15 +197,120 @@
     try {
       data = await response.json();
     } catch (error) {
-      throw new Error("Archive seal response contained invalid JSON");
+      const invalidJson = new Error("Archive seal response contained invalid JSON");
+      invalidJson.name = "ArchiveSealResponseError";
+      invalidJson.status = Number(response?.status) || 0;
+      invalidJson.type = "invalid_archive_response";
+      invalidJson.receiptRelated = false;
+      invalidJson.retryAction = invalidJson.status >= 500 ? "retry-seal" : "stop";
+      throw invalidJson;
     }
     if (!response.ok) {
-      throw new Error(data?.message || data?.error || `Archive seal HTTP ${response.status || "error"}`);
+      const status = Number(response.status) || 0;
+      const message = data?.message || data?.error || `Archive seal HTTP ${status || "error"}`;
+      const suppliedType = typeof data?.type === "string" ? data.type : "";
+      const receiptSignal = `${suppliedType} ${message}`;
+      const receiptRelated =
+        status >= 400 &&
+        status < 500 &&
+        (status === 401 ||
+          status === 403 ||
+          /receipt|expired|mismatch|unauthori[sz]ed|unrecognized|signature/i.test(receiptSignal));
+      const error = new Error(message);
+      error.name = "ArchiveSealResponseError";
+      error.status = status;
+      error.type =
+        suppliedType ||
+        (receiptRelated
+          ? "verification_receipt_rejected"
+          : status >= 500
+            ? "archive_unavailable"
+            : "archive_rejected");
+      error.receiptRelated = receiptRelated;
+      error.retryAction = receiptRelated
+        ? "refresh-verification"
+        : status >= 500
+          ? "retry-seal"
+          : "stop";
+      throw error;
     }
-    if (!data || typeof data !== "object") {
-      throw new Error("Archive seal response was invalid");
+    if (!isValidArchiveSealResponse(data)) {
+      const error = new Error("Invalid archive seal receipt");
+      error.name = "ArchiveSealResponseError";
+      error.status = Number(response.status) || 0;
+      error.type = "invalid_archive_receipt";
+      error.receiptRelated = false;
+      error.retryAction = "stop";
+      throw error;
     }
     return data;
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  }
+
+  function parseJsonObject(value) {
+    if (typeof value !== "string" || !value) return null;
+    try {
+      const parsed = JSON.parse(value);
+      return isPlainObject(parsed) ? parsed : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function isValidArchiveSealResponse(value) {
+    if (!isPlainObject(value)) return false;
+    const statuses = {
+      "local-sealed": new Set([
+        "sealed-local",
+        "sealed-local-fallback",
+        "pinata-response-missing-cid",
+        "browser-fallback",
+      ]),
+      "pinata-ipfs": new Set(["uploaded"]),
+    };
+    if (!statuses[value.provider]?.has(value.status)) return false;
+    if (!/^sha256:[a-f0-9]{64}$/.test(value.contentHash || "")) return false;
+
+    const digest = value.contentHash.slice("sha256:".length);
+    if (
+      (value.provider === "local-sealed" && value.archiveId !== `local://sha256/${digest}`) ||
+      (value.provider === "pinata-ipfs" && !/^ipfs:\/\/[^/\s]+$/.test(value.archiveId || ""))
+    ) return false;
+    if (typeof value.gatewayUrl !== "string") return false;
+    if (value.provider === "pinata-ipfs" && !value.gatewayUrl) return false;
+    if (value.provider === "local-sealed" && value.gatewayUrl) return false;
+    if (!["verified", "draft"].includes(value.sealEligibility)) return false;
+    if (!["live_consensus", "cached_live", "partial", "demo_fallback"].includes(value.verificationState)) {
+      return false;
+    }
+    if (!Number.isFinite(value.truthScore) || value.truthScore < 0 || value.truthScore > 100) return false;
+    if (typeof value.contentCreatedAt !== "string" || !value.contentCreatedAt) return false;
+    if (!Array.isArray(value.requestIds) || value.requestIds.some((id) => typeof id !== "string" || !id)) {
+      return false;
+    }
+    if (typeof value.filename !== "string" || !value.filename.endsWith(".json")) return false;
+    if (!Array.isArray(value.notes) || value.notes.some((note) => typeof note !== "string")) return false;
+
+    const sealed = parseJsonObject(value.json);
+    const preview = parseJsonObject(value.previewJson);
+    if (
+      !sealed ||
+      !["cyber-memory-cemetery/sealed/v0.1", "cyber-memory-cemetery/sealed/v0.2"].includes(
+        sealed.schema,
+      ) ||
+      !isPlainObject(sealed.archive) ||
+      !isPlainObject(sealed.receipt) ||
+      !preview
+    ) return false;
+
+    return ["provider", "status", "contentHash", "archiveId", "sealEligibility"].every(
+      (field) => sealed.receipt[field] === value[field],
+    ) && ["provider", "status", "contentHash", "archiveId"].every(
+      (field) => preview[field] === value[field],
+    );
   }
 
   function archiveCommunitySummary(actions) {

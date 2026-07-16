@@ -286,6 +286,72 @@ test("verification transport rejects invalid JSON and invalid objects but accept
   );
 });
 
+function validArchiveResponse(provider = "local-sealed") {
+  const permanent = provider === "pinata-ipfs";
+  const digest = "c".repeat(64);
+  const contentHash = `sha256:${digest}`;
+  const archiveId = permanent ? "ipfs://bafy-valid-receipt" : `local://sha256/${digest}`;
+  const status = permanent ? "uploaded" : "sealed-local";
+  const receipt = {
+    provider,
+    status,
+    contentHash,
+    archiveId,
+    sealEligibility: "verified",
+  };
+  return {
+    ...receipt,
+    gatewayUrl: permanent ? "https://gateway.example/ipfs/bafy-valid-receipt" : "",
+    contentCreatedAt: "2026-07-15T12:00:00Z",
+    verificationState: "cached_live",
+    truthScore: 88,
+    requestIds: ["request-a", "request-b"],
+    filename: "cyber-memory-xiami-valid.json",
+    json: JSON.stringify({
+      schema: "cyber-memory-cemetery/sealed/v0.2",
+      archive: { case: { id: "xiami" } },
+      receipt,
+    }),
+    previewJson: JSON.stringify({ provider, status, contentHash, archiveId }),
+    notes: [],
+  };
+}
+
+test("archive seal HTTP errors expose status, type, and retry classification", async () => {
+  await assert.rejects(
+    core.readArchiveSealResponse({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        type: "verification_receipt_expired",
+        error: "Verification receipt expired",
+      }),
+    }),
+    (error) => {
+      assert.equal(error.status, 400);
+      assert.equal(error.type, "verification_receipt_expired");
+      assert.equal(error.receiptRelated, true);
+      assert.equal(error.retryAction, "refresh-verification");
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    core.readArchiveSealResponse({
+      ok: false,
+      status: 502,
+      json: async () => ({ type: "archive_unavailable", error: "Archive unavailable" }),
+    }),
+    (error) => {
+      assert.equal(error.status, 502);
+      assert.equal(error.type, "archive_unavailable");
+      assert.equal(error.receiptRelated, false);
+      assert.equal(error.retryAction, "retry-seal");
+      return true;
+    },
+  );
+});
+
 test("archive seal responses reject every explicit HTTP failure", async () => {
   for (const status of [400, 403, 413, 502]) {
     await assert.rejects(
@@ -295,6 +361,43 @@ test("archive seal responses reject every explicit HTTP failure", async () => {
         json: async () => ({ error: `seal rejected ${status}` }),
       }),
       new RegExp(`seal rejected ${status}`),
+    );
+  }
+});
+
+test("archive seal responses accept only structurally valid downloadable receipts", async () => {
+  const local = validArchiveResponse();
+  const permanent = validArchiveResponse("pinata-ipfs");
+  assert.equal(await core.readArchiveSealResponse({ ok: true, status: 200, json: async () => local }), local);
+  assert.equal(
+    await core.readArchiveSealResponse({ ok: true, status: 200, json: async () => permanent }),
+    permanent,
+  );
+
+  const without = (field) => {
+    const result = { ...local };
+    delete result[field];
+    return result;
+  };
+  const malformed = [
+    [],
+    {},
+    { ...local, provider: "unknown-storage" },
+    { ...local, status: "unknown-status" },
+    { ...local, contentHash: "sha256:short" },
+    { ...local, archiveId: "ipfs://wrong-for-local" },
+    { ...permanent, archiveId: `local://sha256/${"c".repeat(64)}` },
+    without("contentHash"),
+    without("filename"),
+    without("json"),
+    without("previewJson"),
+    { ...local, json: JSON.stringify({ schema: "cyber-memory-cemetery/sealed/v0.2", archive: {} }) },
+  ];
+
+  for (const value of malformed) {
+    await assert.rejects(
+      core.readArchiveSealResponse({ ok: true, status: 200, json: async () => value }),
+      /invalid archive seal receipt/i,
     );
   }
 });

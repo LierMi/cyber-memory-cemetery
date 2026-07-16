@@ -1555,6 +1555,7 @@ async function sealCurrentArchive(allowWhileRunning = false) {
   state.archivePayloads[item.id] = basePayload;
   const previousSeal = state.archiveSeals[item.id];
 
+  let nextSeal;
   let response;
   try {
     response = await fetch("/api/archive/seal", {
@@ -1568,7 +1569,7 @@ async function sealCurrentArchive(allowWhileRunning = false) {
       }),
     });
   } catch (error) {
-    state.archiveSeals[item.id] = await CemeteryCore.createLocalArchiveSeal(basePayload, {
+    nextSeal = await CemeteryCore.createLocalArchiveSeal(basePayload, {
       cryptoProvider: globalThis.crypto,
       sealedAt: new Date().toISOString(),
       errorMessage: error.message,
@@ -1577,17 +1578,21 @@ async function sealCurrentArchive(allowWhileRunning = false) {
 
   if (response) {
     try {
-      state.archiveSeals[item.id] = await CemeteryCore.readArchiveSealResponse(response);
+      nextSeal = await CemeteryCore.readArchiveSealResponse(response);
     } catch (error) {
-      delete state.archiveSeals[item.id];
-      delete state.credentials[item.id];
+      if (error.receiptRelated) {
+        delete state.archivePayloads[item.id];
+        if (verification && typeof verification === "object") {
+          delete verification.verificationReceipt;
+        }
+      }
       renderMemorial(item, liveArchive, verification);
       setAgentState(`封存被拒绝：${error.message}`);
       throw error;
     }
   }
 
-  const nextSeal = state.archiveSeals[item.id];
+  state.archiveSeals[item.id] = nextSeal;
   if (
     state.credentials[item.id] &&
     (!previousSeal ||
@@ -1890,6 +1895,17 @@ async function runDemoFlow() {
     activateMuseumTab("exhibit");
     byId("memorial").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
+    if (error.receiptRelated && state.demo.step === 4) {
+      const staleVerification = state.demoResults.verification;
+      if (staleVerification && typeof staleVerification === "object") {
+        delete staleVerification.verificationReceipt;
+      }
+      delete state.demoResults.verification;
+      delete state.archivePayloads.xiami;
+      delete state.demoOperations[3];
+      delete state.demoOperations[4];
+      state.demo = { step: 3, status: "running" };
+    }
     state.demo = CemeteryCore.nextDemoState(state.demo, "failure");
     state.demo.error = error.message;
     renderDemoProgress();

@@ -109,7 +109,7 @@ node --check app.js
 npm run test:browser
 ```
 
-`npm run test:browser` 故意设置 `reuseExistingServer: false`，运行前必须停止任何手动占用 5177 端口的服务，否则 Playwright 会拒绝启动。Playwright 使用隔离的 Chromium，所有 Wayback、Gonka 和 Pinata 相关浏览器请求均由测试路由接管，分别在桌面和移动端运行 12 个流程测试，共 24 个测试；真实 Gonka 探针是套件之外的单独人工验证。
+`npm run test:browser` 故意设置 `reuseExistingServer: false`，运行前必须停止任何手动占用 5177 端口的服务，否则 Playwright 会拒绝启动。Playwright 使用隔离的 Chromium，所有 Wayback、Gonka 和 Pinata 相关浏览器请求均由测试路由接管，分别在桌面和移动端运行 16 个流程测试，共 32 个测试；真实 Gonka 探针是套件之外的单独人工验证。
 
 ## Render 部署配置
 
@@ -130,7 +130,8 @@ npm run test:browser
 - `/api/status` 的 `gonka` 为 `demo_fallback`：检查 `.env` 中是否配置 `GONKA_API_KEY`，然后重启服务。
 - 页面显示 `CACHED LIVE`：当前 Gonka 请求失败，系统恢复了之前的实时共识缓存。这不是当前实时验证。
 - 缓存未恢复：检查案例、证据版本、证据 digest 和模型集合是否完全匹配，并确认记录未超过 `VERIFICATION_CACHE_TTL_SECONDS`。
-- 服务端封存回退到浏览器本地封存：验证回执可能缺失、与证据不匹配、已过期，或因服务重启变得不可识别。重新运行 Gonka 会诊可取得新回执。
+- 服务端明确拒绝验证回执（缺失、格式错误、不匹配、过期或未授权）时，封存会停止，不会创建浏览器本地封存。已有的成功封存和纪念凭证会保留；重新运行 Gonka 会诊取得新回执后才能再次封存。
+- 只有请求未收到任何 HTTP 响应（例如网络中断）时，浏览器才创建本地封存。收到 4xx、5xx 或格式错误的 2xx 响应都不会触发浏览器本地回退；临时 5xx 可使用同一份已验证 payload 和回执重试封存。
 - 页面显示 `PARTIAL`：只有一个模型成功，检查模型可用性、超时和 Router 响应。
 - 档案显示 `local-sealed`：当前没有可用的 Pinata CID。配置 `PINATA_JWT` 后重新封存，或继续使用本地 JSON 和 SHA-256 进行演示。
 - 端口被占用：使用其他端口启动，例如 `PORT=5180 python3 server.py`。
