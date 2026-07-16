@@ -1830,6 +1830,7 @@ function renderDemoProgress() {
   } else {
     summary.textContent = "等待开始";
   }
+  retryButton.textContent = state.demo.retryAction === "stop" ? "重新开始演示" : "从失败步骤重试";
   retryButton.hidden = state.demo.status !== "failed";
   runButton.disabled = isDemoMutationLocked();
   renderInteractionLocks();
@@ -1837,7 +1838,7 @@ function renderDemoProgress() {
 
 async function runDemoFlow() {
   if (state.running) return;
-  const retrying = state.demo.status === "failed";
+  const retrying = state.demo.status === "failed" && state.demo.retryAction !== "stop";
   state.demo = retrying
     ? CemeteryCore.nextDemoState(state.demo, "retry")
     : { step: 0, status: "running" };
@@ -1908,6 +1909,7 @@ async function runDemoFlow() {
     }
     state.demo = CemeteryCore.nextDemoState(state.demo, "failure");
     state.demo.error = error.message;
+    state.demo.retryAction = error.retryAction || null;
     renderDemoProgress();
   } finally {
     state.running = false;

@@ -572,6 +572,48 @@ test("transient archive failure retries sealing with the same verified payload",
   expect(archiveRequests[1]).toEqual(archiveRequests[0]);
 });
 
+test("non-retryable archive failure restarts with fresh verification", async ({ page }) => {
+  let verificationCalls = 0;
+  const archiveRequests = [];
+  await page.route("**/api/gonka/verify", async (route) => {
+    verificationCalls += 1;
+    const prefix = verificationCalls === 1 ? "stale" : "restarted";
+    const result = verificationResult([`${prefix}-request-a`, `${prefix}-request-b`]);
+    result.verificationReceipt = `${prefix}-payload.${prefix}-signature`;
+    await route.fulfill({ json: result });
+  });
+  await page.route("**/api/archive/seal", async (route) => {
+    const request = route.request().postDataJSON();
+    archiveRequests.push(request);
+    if (archiveRequests.length === 1) {
+      await route.fulfill({
+        status: 413,
+        json: { type: "archive_request_too_large", error: "Archive request is too large" },
+      });
+      return;
+    }
+    await route.fulfill({ json: archiveResult(request.payload) });
+  });
+
+  await enterCemetery(page);
+  await page.getByRole("button", { name: "一键演示" }).click();
+  await expect(page.locator('[data-demo-step="4"]')).toHaveAttribute("data-status", "failed");
+  await expect(page.getByRole("button", { name: "重新开始演示" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "从失败步骤重试" })).toHaveCount(0);
+  expect(verificationCalls).toBe(1);
+  expect(archiveRequests).toHaveLength(1);
+
+  await page.getByRole("button", { name: "重新开始演示" }).click();
+  await expectDemoComplete(page);
+  expect(verificationCalls).toBe(2);
+  expect(archiveRequests).toHaveLength(2);
+  expect(archiveRequests[1].verificationReceipt).not.toBe(archiveRequests[0].verificationReceipt);
+  expect(archiveRequests[1].payload.verification.requests.map((request) => request.requestId)).toEqual([
+    "restarted-request-a",
+    "restarted-request-b",
+  ]);
+});
+
 test("archive transport failure alone creates the browser-local fallback", async ({ page }) => {
   await page.route("**/api/archive/seal", (route) => route.abort("failed"));
 
