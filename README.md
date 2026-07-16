@@ -3,6 +3,7 @@
 > 赛博记忆公墓保存的不是网页，而是人类曾经在互联网上活过的证据。
 
 项目入口：[https://cyber-memory-cemetery.vercel.app](https://cyber-memory-cemetery.vercel.app)
+
 Demo 演示：https://drive.google.com/file/d/1AfLgyk09bl_nhrh5xsC8hRLgNpsIPfks/view?usp=sharing
 
 **一句话**：Web2 巨头说关服就关服，几十年的数字青春和文化痕迹被一键抹去。赛博记忆公墓用 Gonka 去中心化 AI 交叉验真 + 去中心化存储，为这些死去的社区立一块**可验证、抹不掉**的链上墓碑——用去中心化网络，对抗中心化资本对人类集体记忆的"强拆"。
