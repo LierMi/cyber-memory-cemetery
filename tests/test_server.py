@@ -45,9 +45,9 @@ class DeploymentConfigurationTests(unittest.TestCase):
         from api.gonka.verify import handler as verify_handler
         from api.status import handler as status_handler
 
-        self.assertIs(status_handler, server.Handler)
-        self.assertIs(verify_handler, server.Handler)
-        self.assertIs(archive_handler, server.Handler)
+        for route_handler in (status_handler, verify_handler, archive_handler):
+            self.assertTrue(issubclass(route_handler, server.Handler))
+            self.assertIsNot(route_handler, server.Handler)
 
 
 class ArchiveSealTests(unittest.TestCase):

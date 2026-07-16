@@ -1,1 +1,5 @@
-from server import Handler as handler
+from server import Handler
+
+
+class handler(Handler):
+    pass
