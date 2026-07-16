@@ -6,24 +6,24 @@
       "provider": "Gonka Router",
       "verificationState": "live_consensus",
       "verifiedAt": "2026-07-16",
-      "truthScore": 82,
-      "scoreSpread": 13,
-      "consensusConfidence": 86,
+      "truthScore": 95,
+      "scoreSpread": 0,
+      "consensusConfidence": 95,
       "evidenceDigest": "sha256:dd3863d09bd4ab8b600a724d0cbccc82ccb22967e6db87eba5f92ba75f8fa9a9",
       "requests": [
         {
           "role": "digital_archaeologist",
           "roleLabel": "数字考古员",
           "model": "MiniMaxAI/MiniMax-M2.7",
-          "requestId": "devshard-30387-13464",
-          "truthScore": 75
+          "requestId": "devshard-30607-9424",
+          "truthScore": 95
         },
         {
           "role": "truth_verifier",
           "roleLabel": "真相校验员",
-          "model": "moonshotai/Kimi-K2.6",
-          "requestId": "devshard-30420-203",
-          "truthScore": 88
+          "model": "MiniMaxAI/MiniMax-M2.7",
+          "requestId": "devshard-30624-13290",
+          "truthScore": 95
         }
       ]
     }

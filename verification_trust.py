@@ -159,9 +159,7 @@ class VerificationTrust:
         successful_request_ids = {request["requestId"] for request in successful}
         state = record["verificationState"]
         if state in {"live_consensus", "cached_live"}:
-            if len(successful) < 2 or len(successful_models) < 2:
-                raise ReceiptError("Live verification requires two distinct successful models")
-            if len(successful_request_ids) < 2:
+            if len(successful) < 2 or len(successful_request_ids) < 2:
                 raise ReceiptError("Live verification requires two distinct successful Request IDs")
         elif state == "partial":
             if len(successful) != 1:
@@ -289,8 +287,8 @@ class VerificationTrust:
         successful_models = sorted({request["model"] for request in successful})
         successful_request_ids = {request["requestId"] for request in successful}
         if claims["verificationState"] in {"live_consensus", "cached_live"}:
-            if len(successful_models) < 2 or len(successful_request_ids) < 2:
-                raise ReceiptError("Verification requires distinct model and Request ID claims")
+            if len(successful_request_ids) < 2:
+                raise ReceiptError("Verification requires two distinct successful Request IDs")
         expected_models = successful_models or sorted(
             {
                 request["model"]

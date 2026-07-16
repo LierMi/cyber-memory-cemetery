@@ -54,7 +54,7 @@ const cases = [
     lastSeen: "2024",
     truthScore: 91,
     certainty: "高",
-    image: "./assets/case-renren-archive.webp",
+    image: "./assets/case-renren-banner.jpg",
     gallery: [
       {
         src: "./assets/evidence-renren-return.png",
@@ -191,7 +191,8 @@ const cases = [
     lastSeen: "2021",
     truthScore: 93,
     certainty: "高",
-    image: "./assets/case-xiami-archive.jpg",
+    image: "./assets/case-xiami-banner.jpg",
+    tombPosition: "center 62%",
     gallery: [
       {
         src: "./assets/evidence-xiami-cassette.jpeg",
@@ -485,15 +486,13 @@ function displayDate() {
 
 function renderCases() {
   const grid = byId("caseGrid");
-  grid.innerHTML = cases
-    .map((item, index) => {
-      const featured = index < 2 ? " featured" : "";
+  // 虾米音乐是主案例，固定置顶；其余保持原顺序
+  const ordered = [...cases].sort((a, b) => (b.id === "xiami") - (a.id === "xiami"));
+  grid.innerHTML = ordered
+    .map((item) => {
       const active = item.id === state.selectedId ? " active" : "";
       return `
-        <article class="case-card${featured}${active}" role="button" tabindex="0" data-case-id="${item.id}">
-          <div class="case-art">
-            <img src="${item.image}" alt="${item.name} 的数字遗址视觉图" width="720" height="540" loading="lazy" />
-          </div>
+        <article class="case-card${active}" role="button" tabindex="0" data-case-id="${item.id}">
           <div class="case-body">
             <div class="case-meta">
               ${createTag(item.status)}
@@ -750,7 +749,7 @@ function renderHistoricalGonkaRecord(item) {
         <strong>历史真实调用</strong>
       </header>
       <p class="historical-gonka-intro">
-        ${escapeHtml(record.verifiedAt)} 通过 ${escapeHtml(record.provider)} 完成双模型交叉验证，以下 Request ID 来自模型接口的真实响应。
+        ${escapeHtml(record.verifiedAt)} 通过 ${escapeHtml(record.provider)} 完成双通道独立交叉验证，以下 Request ID 来自模型接口的真实响应。
       </p>
       <dl class="historical-gonka-metrics">
         <div><dt>Truth Score</dt><dd>${escapeHtml(record.truthScore)}</dd></div>
@@ -1128,11 +1127,15 @@ function renderConsoleWorkbench(item, liveArchive, verification, requests, verif
           <code>${escapeHtml(verificationSource)}</code>
         </div>
       </div>
-      <div class="verification-summary-grid" data-verification-state>
-        ${renderVerificationState(verification)}
-        ${renderConsensusMeter(verification)}
-      </div>
-      ${renderModelCouncil(requests)}
+      ${
+        verification
+          ? `<div class="verification-summary-grid" data-verification-state>
+              ${renderVerificationState(verification)}
+              ${renderConsensusMeter(verification)}
+            </div>
+            ${renderModelCouncil(requests)}`
+          : ""
+      }
       <ol class="console-event-list">
         ${rounds
           .map(
@@ -1463,6 +1466,8 @@ function renderArchiveFragments(item) {
 
 function renderMemorial(item, liveArchive, verification) {
   const detail = byId("memorialDetail");
+  // 纪念册/点灯等交互会触发整块重渲染，保留"展开完整档案"折叠的开合状态，避免每次点击折叠合上
+  const archiveMoreWasOpen = detail.querySelector(".archive-more")?.hasAttribute("open");
   state.currentMemorial = { item, liveArchive, verification };
   const archiveCount = liveArchive?.count || item.archiveCount;
   const firstSeen = liveArchive?.firstYear || item.firstSeen;
@@ -1473,8 +1478,10 @@ function renderMemorial(item, liveArchive, verification) {
   const verificationSource =
     CemeteryCore.verificationResultCopy(verification);
   const archiveSeal = state.archiveSeals[item.id];
+  const hasLiveResult = Boolean(verification);
 
   detail.style.setProperty("--tomb-image", `url("${item.image}")`);
+  detail.style.setProperty("--tomb-position", item.tombPosition || "center");
   detail.innerHTML = `
     <div class="tombstone">
       <span class="lifespan">${firstSeen}-${lastSeen}</span>
@@ -1492,7 +1499,6 @@ function renderMemorial(item, liveArchive, verification) {
         ${createTag(item.originalUrl)}
       </div>
       <blockquote class="epitaph">${item.epitaph}</blockquote>
-      ${renderArchiveFragments(item)}
       <div class="truth-score">
         <div>
           <strong>${truthScore}</strong>
@@ -1508,50 +1514,36 @@ function renderMemorial(item, liveArchive, verification) {
         </div>
       </div>
       ${renderHistoricalGonkaRecord(item)}
-      <div class="verification-summary-grid">
-        ${renderVerificationState(verification)}
-        ${renderConsensusMeter(verification)}
-      </div>
-      ${renderModelCouncil(requests)}
-      ${renderEvidenceConfidence(item)}
-      ${renderRelicPanel(item)}
-      ${renderTombstoneCraftPanel(item, archiveSeal)}
-      ${renderMemorialActionsPanel(item)}
+      ${
+        hasLiveResult
+          ? `<div class="verification-summary-grid">
+              ${renderVerificationState(verification)}
+              ${renderConsensusMeter(verification)}
+            </div>
+            ${renderModelCouncil(requests)}`
+          : ""
+      }
       ${renderCredentialPanel(item, archiveSeal)}
-      ${renderTimeline(item.timeline)}
-      ${renderListSection("可验证事实", item.verifiableFacts)}
-      ${renderListSection("需要谨慎标注的不确定项", item.uncertainClaims, "risk-list")}
-      ${renderTextSection("隐私边界", item.privacyBoundary)}
-      ${renderTextSection("Demo 讲法", item.demoAngle)}
-      ${renderListSection("验证备注", verification?.notes, "risk-list")}
-      ${renderAgentLogPanel(item, requests, verificationSource)}
-      ${renderArchivePanel(item, archiveSeal)}
-      <div class="detail-section">
-        <h4>${CemeteryCore.isPermanentArchiveReceipt(archiveSeal) ? "永久档案" : archiveSeal ? "本地封存" : "待封存档案"} JSON</h4>
-        <ul class="request-list">
-          <li>
-            <strong>archive_payload</strong>
-            <code>${escapeHtml(
-              archiveSeal
-                ? archiveSeal.previewJson
-                : JSON.stringify({
-                    id: item.id,
-                    url: item.originalUrl,
-                    truthScore,
-                    archiveCount,
-                    firstSeen,
-                    lastSeen,
-                    verification: verificationSource,
-                    privacyBoundary: item.privacyBoundary || "public metadata only",
-                    storage: "pending",
-                  }),
-            )}</code>
-          </li>
-        </ul>
-      </div>
-      ${renderSourceLinks(item.sourceLinks)}
+      <details class="archive-more">
+        <summary>展开完整档案 · 证据置信度 / 纪念册 / 时间线 / Agent 日志 / 原始 JSON</summary>
+        <div class="archive-more-body">
+          ${renderEvidenceConfidence(item)}
+          ${renderMemorialActionsPanel(item)}
+          ${renderTimeline(item.timeline)}
+          ${renderListSection("可验证事实", item.verifiableFacts)}
+          ${renderListSection("需要谨慎标注的不确定项", item.uncertainClaims, "risk-list")}
+          ${renderTextSection("隐私边界", item.privacyBoundary)}
+          ${hasLiveResult ? renderListSection("验证备注", verification?.notes, "risk-list") : ""}
+          ${renderAgentLogPanel(item, requests, verificationSource)}
+          ${renderArchivePanel(item, archiveSeal)}
+          ${renderSourceLinks(item.sourceLinks)}
+        </div>
+      </details>
     </div>
   `;
+  if (archiveMoreWasOpen) {
+    detail.querySelector(".archive-more")?.setAttribute("open", "");
+  }
   renderMuseumWorkbenches(item, liveArchive, verification, requests, verificationSource);
   renderInteractionLocks();
 }
@@ -1819,6 +1811,54 @@ function setAgentState(text) {
   byId("agentState").textContent = text;
 }
 
+// 屏幕中央下方的可见提示（封存流程的报错/进度不再藏进控制台）
+function showToast(message, tone = "info") {
+  let el = document.getElementById("appToast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "appToast";
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  el.className = `app-toast ${tone} show`;
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove("show"), 4200);
+}
+
+// 一键封存：没验真就先跑 Gonka 验真 → 封存到 IPFS → 自动生成纪念凭证
+async function runArchiveFlow() {
+  if (isDemoMutationLocked()) return;
+  const current = state.currentMemorial;
+  if (!current) return;
+  const { item } = current;
+  let { liveArchive, verification } = current;
+
+  state.running = true;
+  renderInteractionLocks();
+  try {
+    if (!verification) {
+      showToast("正在运行 Gonka 验真…");
+      setAgentState("验真中…");
+      verification = await verifyWithGonka(item, liveArchive);
+      renderMemorial(item, liveArchive, verification);
+    }
+    showToast("正在封存归档到 IPFS…");
+    setAgentState("封存中…");
+    await sealCurrentArchive(true);
+    const credentialOk = generateMemorialCredential(true);
+    showToast(
+      credentialOk ? "封存完成，纪念凭证已生成 ✓" : "封存完成，但凭证生成失败",
+      credentialOk ? "success" : "error",
+    );
+  } catch (error) {
+    showToast(`封存失败：${error.message}`, "error");
+    setAgentState(`封存失败：${error.message}`);
+  } finally {
+    state.running = false;
+    renderInteractionLocks();
+  }
+}
+
 function enterApp(targetId = "top") {
   document.body.classList.remove("pre-entry");
   activateMuseumTab(targetId === "lab" ? "console" : "exhibit");
@@ -1828,6 +1868,11 @@ function enterApp(targetId = "top") {
       target.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }
+}
+
+function exitToEntry() {
+  document.body.classList.add("pre-entry");
+  window.scrollTo({ top: 0, behavior: "auto" });
 }
 
 function delay(ms) {
@@ -2150,6 +2195,11 @@ function init() {
       enterApp(action === "lab" ? "lab" : "top");
     });
   });
+  // 点左上角品牌返回开屏页
+  document.querySelector(".brand")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    exitToEntry();
+  });
   document.addEventListener("click", async (event) => {
     const tabButton = event.target.closest("[data-museum-tab]");
     if (tabButton) {
@@ -2181,11 +2231,7 @@ function init() {
       downloadCredentialMetadata();
     }
     if (action === "seal-archive") {
-      try {
-        await sealCurrentArchive();
-      } catch (error) {
-        setAgentState(`封存被拒绝：${error.message}`);
-      }
+      await runArchiveFlow();
     }
     if (action === "download-archive") {
       downloadCurrentArchive();

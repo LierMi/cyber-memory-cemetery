@@ -39,20 +39,19 @@ def valid_live_request(request):
 
 
 def aggregate_consensus(requests, evidence_completeness):
-    requests_by_model = {}
+    unique_requests = {}
     request_ids = set()
     for request in requests:
         if not valid_live_request(request):
             continue
-        model = request["model"]
         request_id = request["requestId"]
-        if model in requests_by_model or request_id in request_ids:
+        if request_id in request_ids:
             continue
-        requests_by_model[model] = request
+        unique_requests[request_id] = request
         request_ids.add(request_id)
     scores = [
         normalize_score(request.get("truthScore"), 0)
-        for request in requests_by_model.values()
+        for request in unique_requests.values()
     ]
     if len(scores) >= 2:
         spread = abs(scores[0] - scores[1])

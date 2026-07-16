@@ -334,16 +334,15 @@ def ordered_models():
 
 def resolve_council_models():
     ordered = list(dict.fromkeys(ordered_models()))
-    if len(ordered) < 2:
-        raise ValueError("Gonka model pool must contain at least two distinct model IDs")
+    if len(ordered) < 1:
+        raise ValueError("Gonka model pool is empty")
 
     configs = [GONKA_ARCHAEOLOGIST_MODEL, GONKA_VERIFIER_MODEL]
     explicit = [
         config.strip() if isinstance(config, str) and config.strip().lower() != "auto" else None
         for config in configs
     ]
-    if explicit[0] and explicit[1] and explicit[0] == explicit[1]:
-        raise ValueError("Gonka council requires distinct explicit model IDs")
+    # Gonka 当前只实际服务一个模型，允许同模型双通道（两次独立真实调用）
     for configured in explicit:
         if configured and configured not in ordered:
             raise ValueError(f"Configured Gonka model is unavailable: {configured}")
@@ -358,9 +357,14 @@ def resolve_council_models():
         if configured:
             selected.append(configured)
             continue
-        selected.append(next(model for model in preferred_order if model not in selected))
-    if len(set(selected)) < 2:
-        raise ValueError("Gonka council requires two distinct model IDs")
+        # 自动挑选时优先不同模型；池里不足则复用同一个模型（同模型双通道）
+        pick = next(
+            (model for model in preferred_order if model not in selected),
+            preferred_order[0],
+        )
+        selected.append(pick)
+    if len(selected) < 2:
+        raise ValueError("Gonka council requires two model slots")
     return selected[0], selected[1], ordered
 
 

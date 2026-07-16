@@ -68,7 +68,6 @@
         <a href="#cases">案例</a>
         <a href="#memorial" data-museum-tab="exhibit">墓碑</a>
         <a href="#lab" data-museum-tab="console">建碑</a>
-        <a href="#roadmap" data-museum-tab="archive">封存</a>
       </nav>
     </header>
 
@@ -88,11 +87,8 @@
             展品详情
           </button>
           <button id="museum-tab-console" class="museum-tab" type="button" data-museum-tab="console" role="tab" aria-selected="false" aria-controls="museum-panel-console" tabindex="-1">
-            调查控制台
+            新建墓碑
             <span>AI</span>
-          </button>
-          <button id="museum-tab-archive" class="museum-tab" type="button" data-museum-tab="archive" role="tab" aria-selected="false" aria-controls="museum-panel-archive" tabindex="-1">
-            封存计划
           </button>
         </div>
 
@@ -116,18 +112,6 @@
                 </button>
               </div>
             </div>
-
-            <figure class="hero-visual">
-              <img
-                src="./assets/hero-archive-windows.png"
-                alt="一个由旧网页窗口和电子墓碑构成的赛博公墓"
-                width="960"
-                height="565"
-              />
-              <figcaption>
-                Truth Score / Gonka Request ID / Permanent Archive
-              </figcaption>
-            </figure>
           </section>
 
           <section class="demo-flow" aria-labelledby="demoFlowTitle">
@@ -203,57 +187,6 @@
           </section>
         </div>
 
-        <div id="museum-panel-archive" class="tab-panel" data-tab-panel="archive" role="tabpanel" aria-labelledby="museum-tab-archive" hidden>
-          <section id="roadmap" class="roadmap">
-            <div class="roadmap-copy">
-              <p class="kicker">Archive Plan</p>
-              <h2>证据与封存闭环</h2>
-              <p>
-                第一版让评委看到完整闭环：Gonka 验真、公开证据、可验证封存、纪念凭证。
-              </p>
-            </div>
-
-            <section class="stats-strip" aria-label="产品核心指标">
-              <div>
-                <strong>5</strong>
-                <span>候选记忆案例</span>
-              </div>
-              <div>
-                <strong>2+</strong>
-                <span>多模型交叉验证</span>
-              </div>
-              <div>
-                <strong>0-100</strong>
-                <span>Truth Score</span>
-              </div>
-              <div>
-                <strong>JSON</strong>
-                <span>可下载凭证</span>
-              </div>
-            </section>
-
-            <div id="archiveWorkbench" class="archive-workbench" aria-live="polite"></div>
-
-            <div class="section-heading compact roadmap-build-heading">
-              <p class="kicker">Build Timeline</p>
-              <h2>三天开发进度</h2>
-            </div>
-            <div class="roadmap-grid">
-              <div>
-                <strong>Day 1</strong>
-                <span>前端骨架、案例数据、墓碑页、Wayback 查询兜底。</span>
-              </div>
-              <div>
-                <strong>Day 2</strong>
-                <span>接 Gonka Router，多模型验证，Truth Score 和 Request ID。</span>
-              </div>
-              <div>
-                <strong>Day 3</strong>
-                <span>永久档案、纪念凭证、IPFS 状态、响应式检查、提交 QA 和 README。</span>
-              </div>
-            </div>
-          </section>
-        </div>
       </section>
     </main>
 

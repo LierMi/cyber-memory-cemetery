@@ -119,7 +119,6 @@
     const successful = successfulLiveRequests(requests);
     return (
       successful.length >= 2 &&
-      new Set(successful.map((request) => request.model)).size >= 2 &&
       new Set(successful.map((request) => request.requestId)).size >= 2
     );
   }
@@ -150,10 +149,9 @@
     if (!Array.isArray(result.requests)) return false;
 
     const successful = successfulLiveRequests(result.requests);
-    const distinctModels = new Set(successful.map((request) => request.model));
     const distinctRequestIds = new Set(successful.map((request) => request.requestId));
     if (state === "live_consensus" || state === "cached_live") {
-      return successful.length >= 2 && distinctModels.size >= 2 && distinctRequestIds.size >= 2;
+      return successful.length >= 2 && distinctRequestIds.size >= 2;
     }
     if (state === "partial") return successful.length === 1;
     return (
