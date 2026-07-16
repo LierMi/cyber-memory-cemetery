@@ -112,7 +112,13 @@ img {
   z-index: -2;
   background:
     radial-gradient(ellipse 1100px 750px at 50% 38%, rgba(130, 65, 18, 0.16), transparent 65%),
-    linear-gradient(180deg, #0d0c0a 0%, #070609 55%, #060506 100%);
+    linear-gradient(90deg, rgba(17, 17, 15, 0.9) 0%, rgba(17, 17, 15, 0.64) 42%, rgba(17, 17, 15, 0.3) 100%),
+    linear-gradient(to top, rgba(17, 17, 15, 0.96) 0%, rgba(17, 17, 15, 0.18) 46%, rgba(17, 17, 15, 0.7) 100%),
+    url("./assets/entry-archive-hall.jpg");
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  transform: scale(1.02);
 }
 
 .entry-ghost {
@@ -1281,7 +1287,11 @@ select {
   .entry-bg {
     background:
       radial-gradient(ellipse 700px 500px at 50% 34%, rgba(130, 65, 18, 0.16), transparent 65%),
-      linear-gradient(180deg, #0d0c0a 0%, #070609 55%, #060506 100%);
+      linear-gradient(to top, rgba(17, 17, 15, 0.96) 0%, rgba(17, 17, 15, 0.58) 48%, rgba(17, 17, 15, 0.74) 100%),
+      url("./assets/entry-archive-hall.jpg");
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
   }
 
   .entry-content h1 {
@@ -1456,7 +1466,13 @@ h3 {
 .entry-bg {
   background:
     radial-gradient(ellipse 1100px 750px at 50% 38%, rgba(130, 65, 18, 0.2), transparent 62%),
-    linear-gradient(180deg, #0d0c0a 0%, #070609 55%, #060506 100%);
+    linear-gradient(to top, rgba(7, 6, 9, 0.98), rgba(7, 6, 9, 0.52) 52%, rgba(7, 6, 9, 0.88)),
+    url("./assets/entry-archive-hall.jpg");
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  filter: saturate(0.82) contrast(1.05);
+  opacity: 0.74;
 }
 
 .entry-screen::after {
