@@ -723,14 +723,38 @@ class GonkaCouncilStateTests(unittest.TestCase):
             server,
             "chat_completion",
             return_value={"requestId": "devshard-real-request", "content": "not-json"},
-        ):
+        ) as completion:
             request = server.run_council_member(
                 "digital_archaeologist", "model-a", payload, 0.2
             )
         normalized = server.normalize_council_request(request, 86)
 
+        self.assertEqual(completion.call_count, 2)
         self.assertTrue(normalized["fallback"])
         self.assertIsNone(normalized["truthScore"])
+
+    def test_malformed_model_json_is_retried_once_before_success(self):
+        payload = {"case": {"id": "xiami", "truthScore": 86}}
+        with patch.object(
+            server,
+            "chat_completion",
+            side_effect=[
+                {"requestId": "devshard-invalid-json", "content": "not-json"},
+                {
+                    "requestId": "devshard-valid-json",
+                    "content": '{"summary":"verified","truthScore":88,"verifiedFacts":[],"uncertainClaims":[],"riskFlags":[]}',
+                },
+            ],
+        ) as completion:
+            request = server.run_council_member(
+                "truth_verifier", "model-b", payload, 0.1
+            )
+        normalized = server.normalize_council_request(request, 86)
+
+        self.assertEqual(completion.call_count, 2)
+        self.assertEqual(normalized["requestId"], "devshard-valid-json")
+        self.assertEqual(normalized["truthScore"], 88)
+        self.assertFalse(normalized["fallback"])
 
     def test_two_real_models_normalize_to_live_consensus_and_write_cache(self):
         payload = {

@@ -732,17 +732,20 @@ def fallback_request(role, model, case, reason):
 
 def run_council_member(role, model, payload, temperature):
     role_name = "数字考古员" if role == "digital_archaeologist" else "真相校验员"
-    completion = chat_completion(
-        model,
-        [
-            {"role": "system", "content": f"你是{role_name}。只根据证据直接输出 JSON。"},
-            {"role": "user", "content": build_council_prompt(payload, role_name)},
-        ],
-        temperature=temperature,
-    )
-    parsed = parse_json_object(completion["content"])
-    request_id = completion.get("requestId")
-    raw_score = parsed.get("truthScore", parsed.get("suggestedTruthScore")) if parsed else None
+    messages = [
+        {"role": "system", "content": f"你是{role_name}。只根据证据直接输出 JSON。"},
+        {"role": "user", "content": build_council_prompt(payload, role_name)},
+    ]
+    for _ in range(2):
+        completion = chat_completion(model, messages, temperature=temperature)
+        parsed = parse_json_object(completion["content"])
+        request_id = completion.get("requestId")
+        raw_score = (
+            parsed.get("truthScore", parsed.get("suggestedTruthScore")) if parsed else None
+        )
+        if parsed and normalize_score(raw_score, None) is not None and real_request_id(request_id):
+            break
+
     if not parsed:
         parsed = {"fallback": True, "reason": "Model response was not valid JSON."}
     elif normalize_score(raw_score, None) is None:
