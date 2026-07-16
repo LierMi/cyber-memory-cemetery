@@ -752,6 +752,11 @@ class GonkaCouncilStateTests(unittest.TestCase):
         normalized = server.normalize_council_request(request, 86)
 
         self.assertEqual(completion.call_count, 2)
+        first_messages = completion.call_args_list[0].args[1]
+        retry_messages = completion.call_args_list[1].args[1]
+        self.assertEqual(len(first_messages), 2)
+        self.assertEqual(len(retry_messages), 3)
+        self.assertIn("上一次响应格式无效", retry_messages[-1]["content"])
         self.assertEqual(normalized["requestId"], "devshard-valid-json")
         self.assertEqual(normalized["truthScore"], 88)
         self.assertFalse(normalized["fallback"])

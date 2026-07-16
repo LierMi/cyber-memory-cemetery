@@ -736,8 +736,16 @@ def run_council_member(role, model, payload, temperature):
         {"role": "system", "content": f"你是{role_name}。只根据证据直接输出 JSON。"},
         {"role": "user", "content": build_council_prompt(payload, role_name)},
     ]
-    for _ in range(2):
-        completion = chat_completion(model, messages, temperature=temperature)
+    retry_instruction = {
+        "role": "user",
+        "content": (
+            "上一次响应格式无效。请重新输出一行完整 JSON，且只包含 summary、truthScore、"
+            "verifiedFacts、uncertainClaims、riskFlags；truthScore 必须是 0 到 100 的整数。"
+        ),
+    }
+    for attempt in range(2):
+        attempt_messages = messages if attempt == 0 else [*messages, retry_instruction]
+        completion = chat_completion(model, attempt_messages, temperature=temperature)
         parsed = parse_json_object(completion["content"])
         request_id = completion.get("requestId")
         raw_score = (
